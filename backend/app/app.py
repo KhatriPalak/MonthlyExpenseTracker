@@ -52,6 +52,12 @@ class Expense(db.Model):
     expense_item_count = db.Column(db.Integer, default=1)
     expenditure_date = db.Column(db.Date, nullable=False)
 
+class ExpenseCategory(db.Model):
+    __tablename__ = "expense_category"
+    expense_category_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    expense_category_name = db.Column(db.String(100), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.user_id'), nullable=True)  # Foreign key to user table
+
 class MonthlyLimit(db.Model):
     __tablename__ = "monthly_limit"
     monthly_limit_id = db.Column(db.Integer, primary_key=True)
@@ -147,6 +153,195 @@ def get_months():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/categories', methods=['GET'])
+def get_categories():
+    """Fetch all expense categories for the current user (including global categories)"""
+    try:
+        logger.info('GET /api/categories called')
+        
+        # For now, using user_id = 1 (you can modify this to get from auth token)
+        user_id = 1
+        
+        # Query categories - try with is_deleted filter, fall back if column doesn't exist
+        try:
+            categories = ExpenseCategory.query.filter(
+                ((ExpenseCategory.user_id == None) | (ExpenseCategory.user_id == user_id)),
+                ExpenseCategory.is_deleted == False
+            ).order_by(ExpenseCategory.expense_category_name).all()
+            logger.info('Queried categories with is_deleted filter')
+        except Exception as e:
+            logger.warning('is_deleted column not available, using fallback query: %s', e)
+            categories = ExpenseCategory.query.filter(
+                (ExpenseCategory.user_id == None) | (ExpenseCategory.user_id == user_id)
+            ).order_by(ExpenseCategory.expense_category_name).all()
+        
+        categories_data = [
+            {
+                'category_id': category.expense_category_id,
+                'category_name': category.expense_category_name.title(),  # Show with first letter capital
+                'is_global': category.user_id is None
+            }
+            for category in categories
+        ]
+        
+        logger.info('Returning %d categories from database', len(categories_data))
+        return jsonify({'categories': categories_data})
+        
+    except Exception as e:
+        logger.error('Error fetching categories: %s', e)
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/categories', methods=['POST'])
+def add_category():
+    """Add a new user-specific category or reactivate existing one"""
+    try:
+        logger.info('POST /api/categories called')
+        data = request.json
+        
+        category_name_input = data.get('category_name', '').strip()
+        if not category_name_input:
+            return jsonify({'error': 'Category name is required'}), 400
+        
+        # For now, using user_id = 1 (you can modify this to get from auth token)
+        user_id = 1
+        
+        # Store in database as trimmed and lowercase
+        category_name_db = category_name_input.lower().strip()
+        
+        # Check if category already exists for this user (including deleted ones)
+        existing = ExpenseCategory.query.filter(
+            ExpenseCategory.expense_category_name == category_name_db,
+            ExpenseCategory.user_id == user_id
+        ).first()
+        
+        if existing:
+            # Check if category is deleted and can be reactivated
+            try:
+                if existing.is_deleted:
+                    # Reactivate the deleted category
+                    existing.is_deleted = False
+                    db.session.commit()
+                    logger.info('Reactivated deleted category: %s for user %d', category_name_input, user_id)
+                    
+                    return jsonify({
+                        'success': True,
+                        'category': {
+                            'category_id': existing.expense_category_id,
+                            'category_name': category_name_input.title(),  # Return with proper capitalization
+                            'is_global': False
+                        }
+                    }), 200
+                else:
+                    return jsonify({'error': 'Category already exists'}), 400
+            except AttributeError:
+                # is_deleted column doesn't exist, just check if category exists
+                return jsonify({'error': 'Category already exists'}), 400
+        
+        # Check if a global category with the same name exists
+        try:
+            global_existing = ExpenseCategory.query.filter(
+                ExpenseCategory.expense_category_name == category_name_db,
+                ExpenseCategory.user_id == None,
+                ExpenseCategory.is_deleted == False
+            ).first()
+        except Exception:
+            # is_deleted column doesn't exist, check without is_deleted filter
+            global_existing = ExpenseCategory.query.filter(
+                ExpenseCategory.expense_category_name == category_name_db,
+                ExpenseCategory.user_id == None
+            ).first()
+        
+        if global_existing:
+            return jsonify({'error': 'A global category with this name already exists'}), 400
+        
+        # Create new category
+        try:
+            new_category = ExpenseCategory(
+                expense_category_name=category_name_db,
+                user_id=user_id,
+                is_deleted=False
+            )
+        except Exception:
+            # is_deleted column doesn't exist, create without it
+            new_category = ExpenseCategory(
+                expense_category_name=category_name_db,
+                user_id=user_id
+            )
+        
+        db.session.add(new_category)
+        db.session.commit()
+        
+        logger.info('Created new category: %s (stored as: %s) for user %d', category_name_input, category_name_db, user_id)
+        
+        return jsonify({
+            'success': True,
+            'category': {
+                'category_id': new_category.expense_category_id,
+                'category_name': category_name_input.title(),  # Return with proper capitalization
+                'is_global': False
+            }
+        }), 201
+        
+    except Exception as e:
+        logger.error('Error creating category: %s', e)
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/categories/<int:category_id>', methods=['DELETE'])
+def delete_category(category_id):
+    """Soft delete a category by setting is_deleted = True"""
+    try:
+        logger.info('DELETE /api/categories/%d called', category_id)
+        
+        # For now, using user_id = 1 (you can modify this to get from auth token)
+        user_id = 1
+        
+        # Find the category
+        category = ExpenseCategory.query.filter_by(
+            expense_category_id=category_id
+        ).first()
+        
+        if not category:
+            return jsonify({'error': 'Category not found'}), 404
+        
+        # Check if category is already deleted (if is_deleted column exists)
+        try:
+            if hasattr(category, 'is_deleted') and category.is_deleted:
+                return jsonify({'error': 'Category already deleted'}), 404
+        except Exception as e:
+            logger.warning('Could not check is_deleted status: %s', e)
+        
+        # Check if user can delete this category
+        if category.user_id is not None and category.user_id != user_id:
+            return jsonify({'error': 'You can only delete your own categories'}), 403
+        
+        # Global categories cannot be deleted by users
+        if category.user_id is None:
+            return jsonify({'error': 'Global categories cannot be deleted'}), 403
+        
+        category_name = category.expense_category_name.title()
+        
+        # Perform soft delete by setting is_deleted to True
+        try:
+            category.is_deleted = True
+            db.session.commit()
+            logger.info('Soft deleted category: %s (ID: %d)', category_name, category_id)
+        except AttributeError:
+            # is_deleted column doesn't exist, this shouldn't happen but log a warning
+            logger.warning('Cannot soft delete - is_deleted column not found for category: %s (ID: %d)', category_name, category_id)
+            return jsonify({'error': 'Soft delete not supported - is_deleted column missing'}), 500
+        
+        return jsonify({
+            'success': True,
+            'message': f'Category "{category_name}" deleted successfully'
+        }), 200
+        
+    except Exception as e:
+        logger.error('Error deleting category: %s', e)
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/expenses', methods=['GET'])
 def get_expenses():
     logger.info('GET /api/expenses called')
@@ -225,7 +420,7 @@ def add_expense():
         exp_obj = Expense(
             user_id=1,  # Default user ID for now
             expense_item_price=float(expense.get('amount', 0)),
-            expense_category_id=1,  # Default category ID for now
+            expense_category_id=int(expense.get('category_id', 1)),  # Use provided category_id or default to 1
             expense_description=f"{expense.get('name', 'Unknown')} - {expense.get('description', '')}".strip(' -'),
             expense_item_count=1,
             expenditure_date=expenditure_date

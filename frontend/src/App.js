@@ -21,20 +21,36 @@ function App() {
   const [expenseFormData, setExpenseFormData] = useState({});
   const [globalLimitSuccess, setGlobalLimitSuccess] = useState('');
   const [monthLimitSuccess, setMonthLimitSuccess] = useState({});
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [categoryInput, setCategoryInput] = useState({});
+  const [showCategorySuggestions, setShowCategorySuggestions] = useState({});
+  const [filteredCategories, setFilteredCategories] = useState({});
+  
+  // Modal and temporary category states
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [currentMonthId, setCurrentMonthId] = useState(null);
+  const [tempCategories, setTempCategories] = useState([]); // Categories created during session but not saved yet
+  
+  // Delete confirmation modal states
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState(null);
   // Initialize months immediately with default data for instant display
   const [months, setMonths] = useState([
-    { month_id: 1, month_name: "January" },
-    { month_id: 2, month_name: "February" },
-    { month_id: 3, month_name: "March" },
-    { month_id: 4, month_name: "April" },
-    { month_id: 5, month_name: "May" },
-    { month_id: 6, month_name: "June" },
-    { month_id: 7, month_name: "July" },
-    { month_id: 8, month_name: "August" },
-    { month_id: 9, month_name: "September" },
-    { month_id: 10, month_name: "October" },
-    { month_id: 11, month_name: "November" },
-    { month_id: 12, month_name: "December" }
+    { month_id: 13, month_name: "January" },
+    { month_id: 14, month_name: "February" },
+    { month_id: 15, month_name: "March" },
+    { month_id: 16, month_name: "April" },
+    { month_id: 17, month_name: "May" },
+    { month_id: 18, month_name: "June" },
+    { month_id: 19, month_name: "July" },
+    { month_id: 20, month_name: "August" },
+    { month_id: 21, month_name: "September" },
+    { month_id: 22, month_name: "October" },
+    { month_id: 23, month_name: "November" },
+    { month_id: 24, month_name: "December" }
   ]);
 
   // Check for existing authentication on app load and initialize cached data
@@ -49,32 +65,8 @@ function App() {
         console.log('App: Found saved user data:', userData);
         setUser(userData);
         
-        // Check if this is a new session (new browser, incognito, etc.)
-        const sessionKey = `session_${userData.id}`;
-        const currentSession = sessionStorage.getItem(sessionKey);
-        
-        if (!currentSession) {
-          console.log('App: New session detected - will fetch fresh data from PostgreSQL');
-          // Mark new session but don't load cached data
-          sessionStorage.setItem(sessionKey, Date.now().toString());
-        } else {
-          // Existing session - load cached data for instant display
-          const cacheKey = `expense_data_${userData.id}_${year}`;
-          const cached = localStorage.getItem(cacheKey);
-          if (cached) {
-            try {
-              const cachedData = JSON.parse(cached);
-              console.log('App: Loading cached data for existing session');
-              setGlobalLimit(cachedData.globalLimit || 0);
-              setTempGlobalLimit(cachedData.globalLimit || 0);
-              setMonthLimits(cachedData.monthLimits || {});
-              setTempMonthLimits(cachedData.monthLimits || {});
-              setExpenses(cachedData.expenses || {});
-            } catch (error) {
-              console.log('App: Invalid cached data');
-            }
-          }
-        }
+        // Always fetch fresh data from database - don't rely on cache for critical data
+        console.log('App: User authenticated - will always fetch fresh data from PostgreSQL');
       } catch (error) {
         console.error('App: Error parsing saved user data:', error);
         localStorage.removeItem('user');
@@ -134,6 +126,13 @@ function App() {
     
     const fetchAllDataImmediately = async () => {
       console.log('⚡ App: Loading ALL data immediately for user:', user.id, 'year:', year);
+      setDataLoading(true);
+      setDataLoaded(false);
+      
+      // Force clear all cache before fetching - no cached data issues
+      const cacheKey = `expense_data_${user.id}_${year}`;
+      localStorage.removeItem(cacheKey);
+      console.log('🧹 App: Cleared all cached data to force fresh load from database');
       
       try {
         // Create all API calls to run in parallel for fastest loading
@@ -155,38 +154,45 @@ function App() {
         );
         
         // Create all expense fetch promises
-        const expensePromises = months.map(monthObj => 
-          fetch(`http://localhost:5000/api/expenses?year=${year}&month=${monthObj.month_id}`, {
+        const expensePromises = months.map(monthObj => {
+          const calendarMonth = monthObj.month_id - 12; // Convert database month_id (13-24) to calendar month (1-12)
+          return fetch(`http://localhost:5000/api/expenses?year=${year}&month=${calendarMonth}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' },
             signal: AbortSignal.timeout(8000)
           }).then(response => ({ monthId: monthObj.month_id, response }))
-        );
+        });
+        
+        // Fetch categories
+        const categoriesPromise = fetch('http://localhost:5000/api/categories', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(8000)
+        });
         
         // Execute all requests in parallel
         console.log('⚡ Executing all API calls in parallel...');
-        const [globalLimitResponse, ...monthLimitResponses] = await Promise.allSettled([
+        const [globalLimitResponse, categoriesResponse, ...monthLimitResponses] = await Promise.allSettled([
           globalLimitPromise,
+          categoriesPromise,
           ...monthLimitPromises
         ]);
         
-        const expenseResponses = await Promise.allSettled(expensePromises);
-        
-        // Process global limit
+        // Process and show critical data (limits) immediately
         let globalLimitValue = 0;
         if (globalLimitResponse.status === 'fulfilled') {
           try {
             const globalData = await globalLimitResponse.value.json();
             globalLimitValue = globalData.global_limit || 0;
-            console.log('✅ Global limit loaded:', globalLimitValue);
+            console.log('✅ Global limit loaded immediately:', globalLimitValue);
+            setGlobalLimit(globalLimitValue); // Show immediately
+            setTempGlobalLimit(globalLimitValue);
           } catch (error) {
             console.log('❌ Global limit parse error:', error);
           }
-        } else {
-          console.log('❌ Global limit fetch failed:', globalLimitResponse.reason);
         }
         
-        // Process monthly limits
+        // Process monthly limits immediately
         const limitData = {};
         const tempLimitData = {};
         for (const result of monthLimitResponses) {
@@ -197,7 +203,7 @@ function App() {
               if (monthData.monthly_limit && monthData.monthly_limit > 0) {
                 limitData[monthId] = monthData.monthly_limit;
                 tempLimitData[monthId] = monthData.monthly_limit;
-                console.log(`✅ Monthly limit loaded for month ${monthId}: $${monthData.monthly_limit}`);
+                console.log(`✅ Monthly limit loaded immediately for month ${monthId}: $${monthData.monthly_limit}`);
               }
             } catch (error) {
               console.log('❌ Monthly limit parse error:', error);
@@ -205,7 +211,26 @@ function App() {
           }
         }
         
-        // Process expenses
+        // Apply limits immediately for faster perceived loading
+        setMonthLimits(limitData);
+        setTempMonthLimits(tempLimitData);
+        console.log('🚀 Critical limit data applied immediately');
+        
+        // Load categories immediately
+        if (categoriesResponse.status === 'fulfilled') {
+          try {
+            const categoriesData = await categoriesResponse.value.json();
+            setCategories(categoriesData.categories || []);
+            console.log('✅ Categories loaded:', categoriesData.categories);
+          } catch (error) {
+            console.log('❌ Categories parse error:', error);
+          }
+        }
+        
+        // Now fetch expenses (less critical, can show loading state longer)
+        const expenseResponses = await Promise.allSettled(expensePromises);
+        
+        // Process expenses (limits already processed above)
         const expenseData = {};
         for (const result of expenseResponses) {
           if (result.status === 'fulfilled' && result.value) {
@@ -231,17 +256,16 @@ function App() {
           }
         }
         
-        // Apply ALL data to state immediately - no delays, no complex logic
-        console.log('🚀 Applying ALL data to UI state immediately...');
-        console.log('📊 Setting global limit:', globalLimitValue);
-        console.log('📊 Setting monthly limits:', limitData);
+        // Apply final expense data to state (limits already applied above)
+        console.log('🚀 Applying final expense data to UI state...');
         console.log('📊 Setting expenses for months:', Object.keys(expenseData));
         
-        setGlobalLimit(globalLimitValue);
-        setTempGlobalLimit(globalLimitValue);
-        setMonthLimits(limitData);
-        setTempMonthLimits(tempLimitData);
+        // Only set expenses (limits already set above for faster loading)
         setExpenses(expenseData);
+        
+        // Mark data as loaded
+        setDataLoaded(true);
+        setDataLoading(false);
         
         // Cache the data for performance
         const cacheKey = `expense_data_${user.id}_${year}`;
@@ -263,6 +287,8 @@ function App() {
         setMonthLimits({});
         setTempMonthLimits({});
         setExpenses({});
+        setDataLoaded(true); // Mark as loaded even on error to stop showing loading state
+        setDataLoading(false);
       }
     };
     
@@ -276,7 +302,8 @@ function App() {
       console.log(`App: Refreshing expenses for month ${monthId}`);
       console.log(`App: Current year: ${year}`);
       console.log(`App: Expense key will be: ${year}-${monthId}`);
-      const res = await fetch(`http://localhost:5000/api/expenses?year=${year}&month=${monthId}`);
+      const calendarMonth = monthId - 12; // Convert database month_id (13-24) to calendar month (1-12)
+      const res = await fetch(`http://localhost:5000/api/expenses?year=${year}&month=${calendarMonth}`);
       const data = await res.json();
       console.log(`App: Refreshed expenses for month ${monthId}:`, data);
       console.log(`App: Setting expenses with key: ${year}-${monthId}`);
@@ -410,17 +437,58 @@ function App() {
     const form = expenseFormData[monthIdx] || {};
     console.log('handleExpenseSubmit: Form data:', form);
     
-    if (!form.name || !form.amount || !form.date) {
-      console.error('handleExpenseSubmit: Missing required fields:', { name: form.name, amount: form.amount, date: form.date });
-      alert('Please fill in all required fields');
+    if (!form.name || !form.amount || !form.date || !form.category) {
+      console.error('handleExpenseSubmit: Missing required fields:', { name: form.name, amount: form.amount, date: form.date, category: form.category });
+      alert('Please fill in all required fields (including category)');
       return;
+    }
+    
+    let categoryId = Number(form.category);
+    
+    // Check if this is a temporary category that needs to be created in the database
+    if (categoryId < 0) { // Negative IDs indicate temp categories
+      const tempCategory = tempCategories.find(cat => cat.category_id === categoryId);
+      if (tempCategory) {
+        try {
+          console.log('Creating new category in database:', tempCategory.category_name);
+          
+          // Create the category in the database first
+          const categoryResponse = await fetch('http://localhost:5000/api/categories', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category_name: tempCategory.category_name })
+          });
+          
+          if (!categoryResponse.ok) {
+            const error = await categoryResponse.json();
+            throw new Error(error.error || 'Failed to create category');
+          }
+          
+          const categoryResult = await categoryResponse.json();
+          categoryId = categoryResult.category.category_id;
+          
+          // Update the categories list with the real category
+          setCategories(prev => [...prev, categoryResult.category]);
+          
+          // Remove from temp categories
+          setTempCategories(prev => prev.filter(cat => cat.category_id !== tempCategory.category_id));
+          
+          console.log('Category created successfully with ID:', categoryId);
+          
+        } catch (error) {
+          console.error('Error creating category:', error);
+          alert(`Failed to create category: ${error.message}`);
+          return;
+        }
+      }
     }
     
     const expense = {
       name: form.name,
       amount: Number(form.amount),
       date: form.date,
-      description: form.description || ''
+      description: form.description || '',
+      category_id: categoryId
     };
     console.log('handleExpenseSubmit: Prepared expense object:', expense);
     
@@ -449,6 +517,8 @@ function App() {
       
       setExpenseFormData(form => ({ ...form, [monthIdx]: {} }));
       setShowExpenseForm(forms => ({ ...forms, [monthIdx]: false }));
+      setCategoryInput(prev => ({ ...prev, [monthIdx]: '' }));
+      setShowCategorySuggestions(prev => ({ ...prev, [monthIdx]: false }));
       console.log('handleExpenseSubmit: Form cleared, refreshing expenses');
       
       // Invalidate cache to ensure fresh data
@@ -465,6 +535,236 @@ function App() {
       console.error('handleExpenseSubmit: Error stack:', error.stack);
       alert(`Failed to save expense: ${error.message}`);
     }
+  };
+
+  // Handle category input changes and filtering
+  const handleCategoryInputChange = (monthId, value) => {
+    setCategoryInput(prev => ({ ...prev, [monthId]: value }));
+    
+    if (value.trim()) {
+      // Combine real categories and temp categories, then filter and sort
+      const allCategories = [...categories, ...tempCategories];
+      const filtered = allCategories
+        .filter(category =>
+          category && category.category_name && 
+          category.category_name.toLowerCase().includes(value.toLowerCase())
+        )
+        .sort((a, b) => a.category_name.localeCompare(b.category_name));
+      
+      setFilteredCategories(prev => ({ ...prev, [monthId]: filtered }));
+      setShowCategorySuggestions(prev => ({ ...prev, [monthId]: true }));
+    } else {
+      setShowCategorySuggestions(prev => ({ ...prev, [monthId]: false }));
+      setFilteredCategories(prev => ({ ...prev, [monthId]: [] }));
+    }
+  };
+
+  // Handle category selection from suggestions
+  const handleCategorySelect = (monthId, category) => {
+    setCategoryInput(prev => ({ ...prev, [monthId]: category.category_name }));
+    setExpenseFormData(form => ({
+      ...form,
+      [monthId]: {
+        ...form[monthId],
+        category: category.category_id
+      }
+    }));
+    setShowCategorySuggestions(prev => ({ ...prev, [monthId]: false }));
+  };
+
+  // Handle deleting a category
+  const handleDeleteCategory = (categoryId, categoryName, isTemp = false) => {
+    // Store category info for deletion and show modal
+    setCategoryToDelete({
+      id: categoryId,
+      name: categoryName,
+      isTemp: isTemp
+    });
+    setShowDeleteModal(true);
+  };
+
+  // Confirm and execute category deletion
+  const confirmDeleteCategory = async () => {
+    if (!categoryToDelete) return;
+
+    const { id: categoryId, name: categoryName, isTemp } = categoryToDelete;
+
+    try {
+      if (isTemp) {
+        // Remove from temporary categories
+        setTempCategories(prev => prev.filter(cat => cat.category_id !== categoryId));
+        console.log('Temporary category deleted:', categoryName);
+      } else {
+        // Delete from database
+        console.log('Deleting category from database:', categoryName);
+        
+        const response = await fetch(`http://localhost:5000/api/categories/${categoryId}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to delete category');
+        }
+
+        // Remove from categories list
+        setCategories(prev => prev.filter(cat => cat.category_id !== categoryId));
+        console.log('Category deleted successfully from database:', categoryName);
+      }
+
+      // Clear any form data using this category
+      Object.keys(expenseFormData).forEach(monthId => {
+        const form = expenseFormData[monthId];
+        if (form && form.category === categoryId) {
+          setExpenseFormData(prev => ({
+            ...prev,
+            [monthId]: {
+              ...prev[monthId],
+              category: ''
+            }
+          }));
+          setCategoryInput(prev => ({ ...prev, [monthId]: '' }));
+        }
+      });
+
+      // Close modal and reset state
+      setShowDeleteModal(false);
+      setCategoryToDelete(null);
+
+    } catch (error) {
+      console.error('Error deleting category:', error);
+      alert(`Failed to delete category: ${error.message}`);
+    }
+  };
+
+  // Cancel category deletion
+  const cancelDeleteCategory = () => {
+    setShowDeleteModal(false);
+    setCategoryToDelete(null);
+  };
+
+  // Handle opening the category modal
+  const openCategoryModal = (monthId) => {
+    setCurrentMonthId(monthId);
+    setNewCategoryName('');
+    setShowCategoryModal(true);
+    setShowCategorySuggestions(prev => ({ ...prev, [monthId]: false }));
+  };
+
+  // Handle creating temporary category (not saved to database until Save button)
+  const handleCreateTempCategory = () => {
+    const categoryName = newCategoryName.trim();
+    if (!categoryName || !currentMonthId) return;
+
+    // Check if category already exists (in both real categories and temp categories)
+    const allCategories = [...categories, ...tempCategories];
+    const existingCategory = allCategories.find(cat => 
+      cat && cat.category_name &&
+      cat.category_name.toLowerCase() === categoryName.toLowerCase()
+    );
+
+    if (existingCategory) {
+      alert('Category already exists!');
+      return;
+    }
+
+    // Create temporary category with negative ID (will be replaced when saved to database)
+    // Store with title case for display consistency
+    const tempCategory = {
+      category_id: -(Date.now()), // Negative ID to distinguish from real categories
+      category_name: categoryName.charAt(0).toUpperCase() + categoryName.slice(1).toLowerCase(),
+      is_global: false,
+      is_temp: true // Flag to identify temporary categories
+    };
+
+    // Add to temp categories
+    setTempCategories(prev => [...prev, tempCategory]);
+
+    // Set as selected category
+    setCategoryInput(prev => ({ ...prev, [currentMonthId]: tempCategory.category_name }));
+    setExpenseFormData(form => ({
+      ...form,
+      [currentMonthId]: {
+        ...form[currentMonthId],
+        category: tempCategory.category_id,
+        categoryName: tempCategory.category_name // Store name for temporary categories
+      }
+    }));
+
+    // Close modal
+    setShowCategoryModal(false);
+    setNewCategoryName('');
+    setCurrentMonthId(null);
+  };
+
+  // Handle adding new category when user types a non-existing category
+  const handleAddNewCategory = async (monthId, categoryName) => {
+    if (!categoryName.trim()) return;
+
+    try {
+      const response = await fetch('http://localhost:5000/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category_name: categoryName.trim() })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        // Add the new category to the list
+        setCategories(prev => [...prev, result.category]);
+        
+        // Set the new category as selected
+        setExpenseFormData(form => ({
+          ...form,
+          [monthId]: {
+            ...form[monthId],
+            category: result.category.category_id
+          }
+        }));
+
+        setCategoryInput(prev => ({ ...prev, [monthId]: result.category.category_name }));
+        setShowCategorySuggestions(prev => ({ ...prev, [monthId]: false }));
+        
+        console.log('Category added successfully:', result.category);
+      } else {
+        const error = await response.json();
+        alert(`Failed to add category: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error adding category:', error);
+      alert('Failed to add category. Please try again.');
+    }
+  };
+
+  // Handle category input blur (when user finishes typing)
+  const handleCategoryInputBlur = (monthId) => {
+    setTimeout(() => {
+      const inputValue = categoryInput[monthId]?.trim();
+      if (inputValue) {
+        // Check if the input matches an existing category (including temp categories)
+        const allCategories = [...categories, ...tempCategories];
+        const existingCategory = allCategories.find(cat => 
+          cat && cat.category_name &&
+          cat.category_name.toLowerCase() === inputValue.toLowerCase()
+        );
+        
+        if (existingCategory) {
+          // Select the existing category
+          handleCategorySelect(monthId, existingCategory);
+        } else {
+          // Clear form category selection since it's not a valid category yet
+          setExpenseFormData(form => ({
+            ...form,
+            [monthId]: {
+              ...form[monthId],
+              category: ''
+            }
+          }));
+        }
+      }
+      setShowCategorySuggestions(prev => ({ ...prev, [monthId]: false }));
+    }, 200); // Small delay to allow for suggestion clicks
   };
 
   // Update global limit input (temporary state only)
@@ -662,6 +962,11 @@ function App() {
 
   const handleAddExpense = (monthIdx) => {
     setShowExpenseForm(forms => ({ ...forms, [monthIdx]: !forms[monthIdx] }));
+    // If closing the form, clear category input
+    if (showExpenseForm[monthIdx]) {
+      setCategoryInput(prev => ({ ...prev, [monthIdx]: '' }));
+      setShowCategorySuggestions(prev => ({ ...prev, [monthIdx]: false }));
+    }
   };
 
   // Show loading while checking authentication
@@ -1168,6 +1473,13 @@ function App() {
                                 }}>
                                   Please wait...
                                 </span>
+                              ) : dataLoading ? (
+                                <span style={{
+                                  color: '#94a3b8',
+                                  fontStyle: 'italic'
+                                }}>
+                                  Loading...
+                                </span>
                               ) : (
                                 limit > 0 ? `$${limit.toFixed(2)}` : 'No Limit'
                               )}
@@ -1210,9 +1522,11 @@ function App() {
                               fontSize: '16px',
                               fontWeight: '700'
                             }}>
-                              {limit > 0 ? 
-                                (limitExceeded ? `Over by $${(total - limit).toFixed(2)}` : `Under by $${(limit - total).toFixed(2)}`) 
-                                : 'No Tracking'
+                              {dataLoading ? 'Loading...' : 
+                                (limit > 0 ? 
+                                  (limitExceeded ? `Over by $${(total - limit).toFixed(2)}` : `Under by $${(limit - total).toFixed(2)}`) 
+                                  : 'No Tracking'
+                                )
                               }
                             </div>
                           </div>
@@ -1225,7 +1539,7 @@ function App() {
                           }}>
                             <div style={{ color: '#a855f7', marginBottom: '8px', fontWeight: '600' }}>Expenses</div>
                             <div style={{ color: '#1e293b', fontSize: '18px', fontWeight: '700' }}>
-                              {expList.length} items
+                              {dataLoading ? 'Loading...' : `${expList.length} items`}
                             </div>
                           </div>
                         </div>
@@ -1518,64 +1832,332 @@ function App() {
                             </div>
                           </div>
 
-                          {/* Date Field - Full Width */}
-                          <div>
-                            <label style={{
-                              color: '#475569',
-                              fontSize: '14px',
-                              fontWeight: '600',
-                              marginBottom: '8px',
-                              display: 'block',
-                              fontFamily: "'Inter', sans-serif"
-                            }}>Date</label>
-                            <select 
-                              value={expenseFormData[monthId]?.date || ''} 
-                              onChange={e => handleExpenseInputChange(monthId, 'date', e.target.value)}
-                              style={{
-                                width: '100%',
-                                padding: '16px 20px',
-                                borderRadius: '12px',
-                                border: '2px solid #e2e8f0',
-                                background: 'white',
-                                color: '#1e293b',
-                                fontSize: '16px',
-                                fontWeight: '500',
-                                outline: 'none',
-                                transition: 'all 0.3s ease',
-                                fontFamily: "'Inter', sans-serif",
-                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)',
-                                boxSizing: 'border-box',
-                                cursor: 'pointer'
-                              }}
-                              onFocus={(e) => {
-                                e.target.style.borderColor = '#6366f1';
-                                e.target.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.1)';
-                              }}
-                              onBlur={(e) => {
-                                e.target.style.borderColor = '#e2e8f0';
-                                e.target.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.02)';
-                              }}
-                            >
-                              <option value="" disabled>Select {monthName} date...</option>
-                              {(() => {
-                                // Generate all dates for the current month
-                                const monthIndex = monthId - 13; // monthId starts at 13 for January
-                                const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-                                const dates = [];
+                          {/* Date and Category Row */}
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: '20px'
+                          }}>
+                            <div>
+                              <label style={{
+                                color: '#475569',
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                marginBottom: '8px',
+                                display: 'block',
+                                fontFamily: "'Inter', sans-serif"
+                              }}>Date</label>
+                              <select 
+                                value={expenseFormData[monthId]?.date || ''} 
+                                onChange={e => handleExpenseInputChange(monthId, 'date', e.target.value)}
+                                style={{
+                                  width: '100%',
+                                  padding: '16px 20px',
+                                  borderRadius: '12px',
+                                  border: '2px solid #e2e8f0',
+                                  background: 'white',
+                                  color: '#1e293b',
+                                  fontSize: '16px',
+                                  fontWeight: '500',
+                                  outline: 'none',
+                                  transition: 'all 0.3s ease',
+                                  fontFamily: "'Inter', sans-serif",
+                                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)',
+                                  boxSizing: 'border-box',
+                                  cursor: 'pointer'
+                                }}
+                                onFocus={(e) => {
+                                  e.target.style.borderColor = '#6366f1';
+                                  e.target.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.1)';
+                                }}
+                                onBlur={(e) => {
+                                  e.target.style.borderColor = '#e2e8f0';
+                                  e.target.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.02)';
+                                }}
+                              >
+                                <option value="" disabled>Select {monthName} date...</option>
+                                {(() => {
+                                  // Generate all dates for the current month
+                                  const monthIndex = monthId - 13; // monthId starts at 13 for January
+                                  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+                                  const dates = [];
+                                  
+                                  for (let day = 1; day <= daysInMonth; day++) {
+                                    const date = new Date(year, monthIndex, day);
+                                    const dateString = date.toISOString().split('T')[0];
+                                    const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                                    dates.push(
+                                      <option key={day} value={dateString} style={{ background: 'white', color: '#1e293b' }}>
+                                        {monthName} {day}, {year} ({dayName})
+                                      </option>
+                                    );
+                                  }
+                                  return dates;
+                                })()}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label style={{
+                                color: '#475569',
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                marginBottom: '8px',
+                                display: 'block',
+                                fontFamily: "'Inter', sans-serif"
+                              }}>Category</label>
+                              <div style={{ position: 'relative' }}>
+                                <input 
+                                  type="text"
+                                  placeholder="Type to search or add new category..."
+                                  value={categoryInput[monthId] || ''}
+                                  onChange={e => handleCategoryInputChange(monthId, e.target.value)}
+                                  onBlur={(e) => {
+                                    e.target.style.borderColor = '#e2e8f0';
+                                    e.target.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.02)';
+                                    handleCategoryInputBlur(monthId);
+                                  }}
+                                  onFocus={(e) => {
+                                    e.target.style.borderColor = '#6366f1';
+                                    e.target.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.1)';
+                                    
+                                    // Combine real categories and temp categories
+                                    const allCategories = [...categories, ...tempCategories];
+                                    
+                                    // Show all categories initially, or filtered categories if user has typed something
+                                    if (categoryInput[monthId]?.trim()) {
+                                      const filtered = allCategories
+                                        .filter(category =>
+                                          category && category.category_name && 
+                                          category.category_name.toLowerCase().includes(categoryInput[monthId].toLowerCase())
+                                        )
+                                        .sort((a, b) => a.category_name.localeCompare(b.category_name));
+                                      setFilteredCategories(prev => ({ ...prev, [monthId]: filtered }));
+                                    } else {
+                                      // Show all categories when field is empty, sorted
+                                      const sortedCategories = allCategories
+                                        .filter(category => category && category.category_name)
+                                        .sort((a, b) => a.category_name.localeCompare(b.category_name));
+                                      setFilteredCategories(prev => ({ ...prev, [monthId]: sortedCategories }));
+                                    }
+                                    setShowCategorySuggestions(prev => ({ ...prev, [monthId]: true }));
+                                  }}
+                                  style={{
+                                    width: '100%',
+                                    padding: '16px 20px',
+                                    borderRadius: '12px',
+                                    border: '2px solid #e2e8f0',
+                                    background: 'white',
+                                    color: '#1e293b',
+                                    fontSize: '16px',
+                                    fontWeight: '500',
+                                    outline: 'none',
+                                    transition: 'all 0.3s ease',
+                                    fontFamily: "'Inter', sans-serif",
+                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)',
+                                    boxSizing: 'border-box'
+                                  }}
+                                />
                                 
-                                for (let day = 1; day <= daysInMonth; day++) {
-                                  const date = new Date(year, monthIndex, day);
-                                  const dateString = date.toISOString().split('T')[0];
-                                  const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-                                  dates.push(
-                                    <option key={day} value={dateString} style={{ background: 'white', color: '#1e293b' }}>
-                                      {monthName} {day}, {year} ({dayName})
-                                    </option>
-                                  );
-                                }
-                                return dates;
-                              })()}
-                            </select>
+                                {/* Category Suggestions Dropdown */}
+                                {showCategorySuggestions[monthId] && (
+                                  <div style={{
+                                    position: 'absolute',
+                                    top: '100%',
+                                    left: 0,
+                                    right: 0,
+                                    backgroundColor: 'white',
+                                    border: '2px solid #e2e8f0',
+                                    borderTop: 'none',
+                                    borderRadius: '0 0 12px 12px',
+                                    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
+                                    zIndex: 1000,
+                                    maxHeight: '200px',
+                                    overflowY: 'auto'
+                                  }}>
+                                    {/* Show "Add Category" button at top when field is first clicked (empty) */}
+                                    {!categoryInput[monthId]?.trim() && (
+                                      <div
+                                        onMouseDown={() => openCategoryModal(monthId)}
+                                        style={{
+                                          padding: '12px 20px',
+                                          cursor: 'pointer',
+                                          fontSize: '16px',
+                                          fontWeight: '600',
+                                          color: '#6366f1',
+                                          fontFamily: "'Inter', sans-serif",
+                                          transition: 'background-color 0.2s ease',
+                                          background: '#fafbff',
+                                          borderBottom: '2px solid #e2e8f0'
+                                        }}
+                                        onMouseOver={(e) => {
+                                          e.target.style.backgroundColor = '#f0f0ff';
+                                        }}
+                                        onMouseOut={(e) => {
+                                          e.target.style.backgroundColor = '#fafbff';
+                                        }}
+                                      >
+                                        ➕ Add New Category
+                                      </div>
+                                    )}
+                                    
+                                    {/* Show existing category matches */}
+                                    {filteredCategories[monthId]?.map(category => (
+                                      <div
+                                        key={category.category_id}
+                                        style={{
+                                          padding: '12px 20px',
+                                          borderBottom: '1px solid #f1f5f9',
+                                          fontSize: '16px',
+                                          fontWeight: '500',
+                                          color: '#1e293b',
+                                          fontFamily: "'Inter', sans-serif",
+                                          transition: 'background-color 0.2s ease',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between'
+                                        }}
+                                        onMouseOver={(e) => {
+                                          e.currentTarget.style.backgroundColor = '#f8fafc';
+                                        }}
+                                        onMouseOut={(e) => {
+                                          e.currentTarget.style.backgroundColor = 'white';
+                                        }}
+                                      >
+                                        <div
+                                          onMouseDown={(e) => {
+                                            e.stopPropagation();
+                                            handleCategorySelect(monthId, category);
+                                          }}
+                                          style={{
+                                            cursor: 'pointer',
+                                            flex: 1,
+                                            display: 'flex',
+                                            alignItems: 'center'
+                                          }}
+                                        >
+                                          {category.category_name}
+                                          {category.is_global && (
+                                            <span style={{
+                                              fontSize: '12px',
+                                              color: '#64748b',
+                                              marginLeft: '8px',
+                                              fontWeight: '400'
+                                            }}>
+                                              (Global)
+                                            </span>
+                                          )}
+                                          {category.is_temp && (
+                                            <span style={{
+                                              fontSize: '12px',
+                                              color: '#f59e0b',
+                                              marginLeft: '8px',
+                                              fontWeight: '400'
+                                            }}>
+                                              (New)
+                                            </span>
+                                          )}
+                                        </div>
+                                        
+                                        {/* Delete button (only for non-global categories or temp categories) */}
+                                        {(!category.is_global || category.is_temp) && (
+                                          <button
+                                            onMouseDown={(e) => {
+                                              e.stopPropagation();
+                                              handleDeleteCategory(
+                                                category.category_id, 
+                                                category.category_name, 
+                                                category.is_temp
+                                              );
+                                            }}
+                                            style={{
+                                              background: 'none',
+                                              border: 'none',
+                                              color: '#ef4444',
+                                              fontSize: '18px',
+                                              fontWeight: 'bold',
+                                              cursor: 'pointer',
+                                              padding: '4px 8px',
+                                              borderRadius: '4px',
+                                              transition: 'all 0.2s ease',
+                                              marginLeft: '8px',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              minWidth: '24px',
+                                              height: '24px'
+                                            }}
+                                            onMouseOver={(e) => {
+                                              e.target.style.backgroundColor = '#fee2e2';
+                                              e.target.style.color = '#dc2626';
+                                            }}
+                                            onMouseOut={(e) => {
+                                              e.target.style.backgroundColor = 'transparent';
+                                              e.target.style.color = '#ef4444';
+                                            }}
+                                            title={`Delete "${category.category_name}"`}
+                                          >
+                                            ×
+                                          </button>
+                                        )}
+                                      </div>
+                                    ))}
+                                    
+                                    {/* Show "Add [typed text] as new category" option if user has typed something and no exact match found */}
+                                    {(() => {
+                                      const inputValue = categoryInput[monthId]?.trim();
+                                      const allCategories = [...categories, ...tempCategories];
+                                      const exactMatch = allCategories.find(cat => 
+                                        cat && cat.category_name && inputValue &&
+                                        cat.category_name.toLowerCase() === inputValue.toLowerCase()
+                                      );
+                                      const hasFilteredResults = filteredCategories[monthId]?.length > 0;
+                                      
+                                      if (inputValue && !exactMatch) {
+                                        return (
+                                          <div
+                                            onMouseDown={() => handleAddNewCategory(monthId, inputValue)}
+                                            style={{
+                                              padding: '12px 20px',
+                                              cursor: 'pointer',
+                                              fontSize: '16px',
+                                              fontWeight: '600',
+                                              color: '#6366f1',
+                                              fontFamily: "'Inter', sans-serif",
+                                              transition: 'background-color 0.2s ease',
+                                              borderTop: hasFilteredResults ? '2px solid #f1f5f9' : 'none',
+                                              background: '#fafbff'
+                                            }}
+                                            onMouseOver={(e) => {
+                                              e.target.style.backgroundColor = '#f0f0ff';
+                                            }}
+                                            onMouseOut={(e) => {
+                                              e.target.style.backgroundColor = '#fafbff';
+                                            }}
+                                          >
+                                            ➕ Add "{inputValue}" as new category
+                                          </div>
+                                        );
+                                      }
+                                      return null;
+                                    })()}
+                                    
+                                    {/* Show message when no categories exist yet */}
+                                    {filteredCategories[monthId]?.length === 0 && !categoryInput[monthId]?.trim() && categories.length === 0 && tempCategories.length === 0 && (
+                                      <div style={{
+                                        padding: '12px 20px',
+                                        fontSize: '14px',
+                                        color: '#64748b',
+                                        fontStyle: 'italic',
+                                        fontFamily: "'Inter', sans-serif"
+                                      }}>
+                                        No categories available. Click "Add New Category" to create one!
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
 
                           {/* Description Field - Full Width */}
@@ -1626,7 +2208,11 @@ function App() {
                           justifyContent: 'flex-end'
                         }}>
                           <button 
-                            onClick={() => setShowExpenseForm(forms => ({ ...forms, [monthId]: false }))}
+                            onClick={() => {
+                              setShowExpenseForm(forms => ({ ...forms, [monthId]: false }));
+                              setCategoryInput(prev => ({ ...prev, [monthId]: '' }));
+                              setShowCategorySuggestions(prev => ({ ...prev, [monthId]: false }));
+                            }}
                             style={{
                               background: 'white',
                               border: '2px solid #e2e8f0',
@@ -1828,6 +2414,280 @@ function App() {
           })}
         </div>
       </main>
+      
+      {/* Category Creation Modal */}
+      {showCategoryModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '16px',
+            padding: '32px',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+            minWidth: '400px',
+            maxWidth: '500px'
+          }}>
+            <h3 style={{
+              margin: '0 0 24px 0',
+              fontSize: '24px',
+              fontWeight: '700',
+              color: '#1e293b',
+              fontFamily: "'Inter', sans-serif"
+            }}>
+              Add New Category
+            </h3>
+            
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{
+                color: '#475569',
+                fontSize: '14px',
+                fontWeight: '600',
+                marginBottom: '8px',
+                display: 'block',
+                fontFamily: "'Inter', sans-serif"
+              }}>
+                Category Name
+              </label>
+              <input
+                type="text"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleCreateTempCategory();
+                  } else if (e.key === 'Escape') {
+                    setShowCategoryModal(false);
+                    setNewCategoryName('');
+                  }
+                }}
+                placeholder="Enter category name..."
+                autoFocus
+                style={{
+                  width: '100%',
+                  padding: '16px 20px',
+                  borderRadius: '12px',
+                  border: '2px solid #e2e8f0',
+                  background: 'white',
+                  color: '#1e293b',
+                  fontSize: '16px',
+                  fontWeight: '500',
+                  outline: 'none',
+                  transition: 'all 0.3s ease',
+                  fontFamily: "'Inter', sans-serif",
+                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)',
+                  boxSizing: 'border-box'
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = '#6366f1';
+                  e.target.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.1)';
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = '#e2e8f0';
+                  e.target.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.02)';
+                }}
+              />
+            </div>
+            
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end'
+            }}>
+              <button
+                onClick={() => {
+                  setShowCategoryModal(false);
+                  setNewCategoryName('');
+                }}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '8px',
+                  border: '2px solid #e2e8f0',
+                  background: 'white',
+                  color: '#64748b',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  fontFamily: "'Inter', sans-serif"
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f8fafc';
+                  e.target.style.borderColor = '#cbd5e1';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'white';
+                  e.target.style.borderColor = '#e2e8f0';
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateTempCategory}
+                disabled={!newCategoryName.trim()}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '8px',
+                  border: '2px solid #6366f1',
+                  background: newCategoryName.trim() ? '#6366f1' : '#e2e8f0',
+                  color: newCategoryName.trim() ? 'white' : '#94a3b8',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: newCategoryName.trim() ? 'pointer' : 'not-allowed',
+                  transition: 'all 0.3s ease',
+                  fontFamily: "'Inter', sans-serif"
+                }}
+                onMouseEnter={(e) => {
+                  if (newCategoryName.trim()) {
+                    e.target.style.backgroundColor = '#5856eb';
+                    e.target.style.borderColor = '#5856eb';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (newCategoryName.trim()) {
+                    e.target.style.backgroundColor = '#6366f1';
+                    e.target.style.borderColor = '#6366f1';
+                  }
+                }}
+              >
+                Add Category
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Category Delete Confirmation Modal */}
+      {showDeleteModal && categoryToDelete && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '16px',
+            padding: '32px',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+            minWidth: '400px',
+            maxWidth: '500px'
+          }}>
+            <h3 style={{
+              margin: '0 0 16px 0',
+              fontSize: '24px',
+              fontWeight: '700',
+              color: '#dc2626',
+              fontFamily: "'Inter', sans-serif",
+              display: 'flex',
+              alignItems: 'center'
+            }}>
+              <span style={{
+                fontSize: '28px',
+                marginRight: '12px'
+              }}>⚠️</span>
+              Delete Category
+            </h3>
+            
+            <p style={{
+              margin: '0 0 24px 0',
+              fontSize: '16px',
+              color: '#475569',
+              lineHeight: '1.6',
+              fontFamily: "'Inter', sans-serif"
+            }}>
+              Are you sure you want to delete the category{' '}
+              <span style={{
+                fontWeight: '600',
+                color: '#1e293b'
+              }}>
+                "{categoryToDelete.name}"
+              </span>?
+              <br />
+              <span style={{
+                fontSize: '14px',
+                color: '#64748b',
+                marginTop: '8px',
+                display: 'block'
+              }}>
+                This action cannot be undone.
+              </span>
+            </p>
+            
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end'
+            }}>
+              <button
+                onClick={cancelDeleteCategory}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '8px',
+                  border: '2px solid #e2e8f0',
+                  background: 'white',
+                  color: '#64748b',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  fontFamily: "'Inter', sans-serif"
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f8fafc';
+                  e.target.style.borderColor = '#cbd5e1';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'white';
+                  e.target.style.borderColor = '#e2e8f0';
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteCategory}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '8px',
+                  border: '2px solid #dc2626',
+                  background: '#dc2626',
+                  color: 'white',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  fontFamily: "'Inter', sans-serif"
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#b91c1c';
+                  e.target.style.borderColor = '#b91c1c';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#dc2626';
+                  e.target.style.borderColor = '#dc2626';
+                }}
+              >
+                Delete Category
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
     </>
   );

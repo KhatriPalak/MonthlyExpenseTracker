@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, Date
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, Date, Boolean
 from sqlalchemy.orm import relationship
 from db import Base
 
@@ -11,12 +11,16 @@ class User(Base):
     global_limit = Column(Float, default=0)
     expenses = relationship("Expense", back_populates="user")
     monthly_limits = relationship("MonthlyLimit", back_populates="user")
+    categories = relationship("ExpenseCategory", back_populates="user")
 
 class ExpenseCategory(Base):
     __tablename__ = "expense_category"
     expense_category_id = Column(Integer, primary_key=True, autoincrement=True)
-    expense_category_name = Column(String(100), nullable=False, unique=True)
+    expense_category_name = Column(String(100), nullable=False)
+    user_id = Column(Integer, ForeignKey("user.user_id"), nullable=True)  # NULL for global categories
+    is_deleted = Column(Boolean, default=False, nullable=False)
     expenses = relationship("Expense", back_populates="category")
+    user = relationship("User", back_populates="categories")
 
 class Month(Base):
     __tablename__ = "month"
