@@ -57,6 +57,7 @@ class ExpenseCategory(db.Model):
     expense_category_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     expense_category_name = db.Column(db.String(100), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.user_id'), nullable=True)  # Foreign key to user table
+    is_deleted = db.Column(db.Boolean, default=False, nullable=False)  # Soft delete flag
 
 class MonthlyLimit(db.Model):
     __tablename__ = "monthly_limit"
@@ -312,25 +313,27 @@ def delete_category(category_id):
         except Exception as e:
             logger.warning('Could not check is_deleted status: %s', e)
         
-        # Check if user can delete this category
+        # Allow deletion of both user-specific categories and global categories
+        # Users can only delete their own categories, but can also delete global categories
         if category.user_id is not None and category.user_id != user_id:
             return jsonify({'error': 'You can only delete your own categories'}), 403
-        
-        # Global categories cannot be deleted by users
-        if category.user_id is None:
-            return jsonify({'error': 'Global categories cannot be deleted'}), 403
         
         category_name = category.expense_category_name.title()
         
         # Perform soft delete by setting is_deleted to True
         try:
-            category.is_deleted = True
-            db.session.commit()
-            logger.info('Soft deleted category: %s (ID: %d)', category_name, category_id)
-        except AttributeError:
-            # is_deleted column doesn't exist, this shouldn't happen but log a warning
-            logger.warning('Cannot soft delete - is_deleted column not found for category: %s (ID: %d)', category_name, category_id)
-            return jsonify({'error': 'Soft delete not supported - is_deleted column missing'}), 500
+            if hasattr(category, 'is_deleted'):
+                category.is_deleted = True
+                db.session.commit()
+                logger.info('Soft deleted category: %s (ID: %d)', category_name, category_id)
+            else:
+                # Fallback: is_deleted column doesn't exist, return error
+                logger.warning('Cannot soft delete - is_deleted column not found for category: %s (ID: %d)', category_name, category_id)
+                return jsonify({'error': 'Soft delete not supported - is_deleted column missing. Please run database migration.'}), 500
+        except Exception as e:
+            logger.error('Error setting is_deleted flag: %s', e)
+            db.session.rollback()
+            return jsonify({'error': f'Failed to delete category: {str(e)}'}), 500
         
         return jsonify({
             'success': True,
