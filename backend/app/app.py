@@ -725,6 +725,131 @@ def login():
         logger.error('Error in login: %s', e, exc_info=True)
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
+@app.route('/api/summary', methods=['GET'])
+def get_expense_summary():
+    """Get expense summary for different time periods"""
+    try:
+        logger.info('GET /api/summary called')
+        
+        # Get query parameters
+        summary_type = request.args.get('type', 'monthly')  # monthly, yearly, custom
+        year = request.args.get('year', 2025, type=int)
+        month = request.args.get('month', type=int)
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        user_id = 1  # For now, using user_id = 1
+        
+        logger.info('Summary request - type: %s, year: %s, month: %s, start_date: %s, end_date: %s', 
+                   summary_type, year, month, start_date, end_date)
+        
+        if summary_type == 'monthly':
+            if not month:
+                return jsonify({'error': 'Month is required for monthly summary'}), 400
+            
+            # Get monthly expenses
+            from sqlalchemy import extract
+            expenses = Expense.query.filter(
+                Expense.user_id == user_id,
+                extract('year', Expense.expenditure_date) == year,
+                extract('month', Expense.expenditure_date) == month
+            ).all()
+            
+        elif summary_type == 'yearly':
+            # Get yearly expenses
+            from sqlalchemy import extract
+            expenses = Expense.query.filter(
+                Expense.user_id == user_id,
+                extract('year', Expense.expenditure_date) == year
+            ).all()
+            
+        elif summary_type == 'custom':
+            if not start_date or not end_date:
+                return jsonify({'error': 'Start date and end date are required for custom summary'}), 400
+            
+            # Get expenses between dates
+            from datetime import datetime
+            start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
+            end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
+            
+            expenses = Expense.query.filter(
+                Expense.user_id == user_id,
+                Expense.expenditure_date >= start_date_obj,
+                Expense.expenditure_date <= end_date_obj
+            ).all()
+            
+        else:
+            return jsonify({'error': 'Invalid summary type'}), 400
+        
+        # Calculate summary data
+        total_amount = sum(expense.expense_item_price for expense in expenses)
+        total_count = len(expenses)
+        
+        # Category breakdown
+        category_breakdown = {}
+        for expense in expenses:
+            # Get category name (you might need to join with category table)
+            category_name = 'Uncategorized'  # Default
+            try:
+                category = ExpenseCategory.query.filter_by(
+                    expense_category_id=expense.expense_category_id
+                ).first()
+                if category:
+                    category_name = category.expense_category_name.title()
+            except:
+                pass
+            
+            if category_name not in category_breakdown:
+                category_breakdown[category_name] = {'total': 0, 'count': 0}
+            
+            category_breakdown[category_name]['total'] += expense.expense_item_price
+            category_breakdown[category_name]['count'] += 1
+        
+        # Monthly breakdown for yearly summary
+        monthly_breakdown = {}
+        if summary_type == 'yearly':
+            for expense in expenses:
+                month_name = expense.expenditure_date.strftime('%B')
+                if month_name not in monthly_breakdown:
+                    monthly_breakdown[month_name] = {'total': 0, 'count': 0}
+                
+                monthly_breakdown[month_name]['total'] += expense.expense_item_price
+                monthly_breakdown[month_name]['count'] += 1
+        
+        # Prepare response
+        summary_data = {
+            'type': summary_type,
+            'period': {
+                'year': year,
+                'month': month if summary_type == 'monthly' else None,
+                'start_date': start_date if summary_type == 'custom' else None,
+                'end_date': end_date if summary_type == 'custom' else None
+            },
+            'total_amount': total_amount,
+            'total_count': total_count,
+            'category_breakdown': category_breakdown,
+            'monthly_breakdown': monthly_breakdown if summary_type == 'yearly' else None,
+            'expenses': [
+                {
+                    'expense_id': expense.expense_id,
+                    'amount': expense.expense_item_price,
+                    'description': expense.expense_description,
+                    'date': expense.expenditure_date.isoformat(),
+                    'category_id': expense.expense_category_id
+                } for expense in expenses
+            ]
+        }
+        
+        logger.info('Summary calculated - total: $%.2f, count: %d, categories: %d',
+                   total_amount, total_count, len(category_breakdown))
+        
+        return jsonify({'summary': summary_data}), 200
+        
+    except Exception as e:
+        logger.error('Error getting expense summary: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+
 # Add manual CORS headers for all requests
 @app.after_request
 def after_request(response):

@@ -37,6 +37,16 @@ function App() {
   // Delete confirmation modal states
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState(null);
+  
+  // Summary states
+  const [selectedSummaryType, setSelectedSummaryType] = useState('monthly'); // 'monthly', 'yearly', 'custom'
+  const [summaryYear, setSummaryYear] = useState(2025);
+  const [summaryMonth, setSummaryMonth] = useState(8); // August
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [summaryData, setSummaryData] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  
   // Initialize months immediately with default data for instant display
   const [months, setMonths] = useState([
     { month_id: 13, month_name: "January" },
@@ -296,6 +306,7 @@ function App() {
     fetchAllDataImmediately();
   }, [user, year]); // Only depend on user and year changes
 
+
   // Function to refresh expenses for a specific month
   const refreshExpensesForMonth = async (monthId) => {
     try {
@@ -391,6 +402,207 @@ function App() {
     // Reload the page to force a complete refresh
     window.location.reload();
   };
+
+  // Summary calculation functions
+  const calculateMonthlySummary = () => {
+    const monthId = summaryMonth + 12; // Convert calendar month to database month_id
+    const expenseKey = `${summaryYear}-${monthId}`;
+    const monthExpenses = expenses[expenseKey] || [];
+    
+    const total = monthExpenses.reduce((sum, expense) => sum + (expense.expense_item_price || 0), 0);
+    const count = monthExpenses.length;
+    
+    // Calculate category breakdown
+    const categoryBreakdown = {};
+    monthExpenses.forEach(expense => {
+      const categoryName = expense.category_name || 'Uncategorized';
+      if (!categoryBreakdown[categoryName]) {
+        categoryBreakdown[categoryName] = { total: 0, count: 0 };
+      }
+      categoryBreakdown[categoryName].total += expense.expense_item_price || 0;
+      categoryBreakdown[categoryName].count += 1;
+    });
+
+    const monthName = months.find(m => m.month_id === monthId)?.month_name || 'Unknown';
+    
+    return {
+      title: `${monthName} ${summaryYear}`,
+      total,
+      count,
+      categoryBreakdown,
+      expenses: monthExpenses
+    };
+  };
+
+  const calculateYearlySummary = () => {
+    let total = 0;
+    let count = 0;
+    const categoryBreakdown = {};
+    const monthlyBreakdown = {};
+    const allExpenses = [];
+
+    months.forEach(monthObj => {
+      const monthId = monthObj.month_id;
+      const expenseKey = `${summaryYear}-${monthId}`;
+      const monthExpenses = expenses[expenseKey] || [];
+      
+      const monthTotal = monthExpenses.reduce((sum, expense) => sum + (expense.expense_item_price || 0), 0);
+      monthlyBreakdown[monthObj.month_name] = {
+        total: monthTotal,
+        count: monthExpenses.length
+      };
+
+      total += monthTotal;
+      count += monthExpenses.length;
+      allExpenses.push(...monthExpenses);
+
+      // Category breakdown
+      monthExpenses.forEach(expense => {
+        const categoryName = expense.category_name || 'Uncategorized';
+        if (!categoryBreakdown[categoryName]) {
+          categoryBreakdown[categoryName] = { total: 0, count: 0 };
+        }
+        categoryBreakdown[categoryName].total += expense.expense_item_price || 0;
+        categoryBreakdown[categoryName].count += 1;
+      });
+    });
+
+    return {
+      title: `Year ${summaryYear}`,
+      total,
+      count,
+      categoryBreakdown,
+      monthlyBreakdown,
+      expenses: allExpenses
+    };
+  };
+
+  const calculateCustomDateSummary = () => {
+    if (!customStartDate || !customEndDate) return null;
+
+    const startDate = new Date(customStartDate);
+    const endDate = new Date(customEndDate);
+    
+    let total = 0;
+    let count = 0;
+    const categoryBreakdown = {};
+    const filteredExpenses = [];
+
+    // Go through all expenses across all months
+    Object.keys(expenses).forEach(expenseKey => {
+      const monthExpenses = expenses[expenseKey] || [];
+      
+      monthExpenses.forEach(expense => {
+        const expenseDate = new Date(expense.expenditure_date);
+        
+        if (expenseDate >= startDate && expenseDate <= endDate) {
+          total += expense.expense_item_price || 0;
+          count += 1;
+          filteredExpenses.push(expense);
+
+          const categoryName = expense.category_name || 'Uncategorized';
+          if (!categoryBreakdown[categoryName]) {
+            categoryBreakdown[categoryName] = { total: 0, count: 0 };
+          }
+          categoryBreakdown[categoryName].total += expense.expense_item_price || 0;
+          categoryBreakdown[categoryName].count += 1;
+        }
+      });
+    });
+
+    const formatDate = (date) => date.toLocaleDateString('en-US', { 
+      year: 'numeric', month: 'short', day: 'numeric' 
+    });
+
+    return {
+      title: `${formatDate(startDate)} - ${formatDate(endDate)}`,
+      total,
+      count,
+      categoryBreakdown,
+      expenses: filteredExpenses
+    };
+  };
+
+  const generateSummary = async () => {
+    setSummaryLoading(true);
+    
+    try {
+      // Try to use backend API for more accurate data
+      let apiUrl = 'http://localhost:5000/api/summary';
+      let params = new URLSearchParams();
+      
+      params.append('type', selectedSummaryType);
+      
+      if (selectedSummaryType === 'monthly') {
+        params.append('year', summaryYear);
+        params.append('month', summaryMonth);
+      } else if (selectedSummaryType === 'yearly') {
+        params.append('year', summaryYear);
+      } else if (selectedSummaryType === 'custom') {
+        if (!customStartDate || !customEndDate) {
+          setSummaryData(null);
+          setSummaryLoading(false);
+          return;
+        }
+        params.append('start_date', customStartDate);
+        params.append('end_date', customEndDate);
+      }
+      
+      const response = await fetch(`${apiUrl}?${params.toString()}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        const backendSummary = data.summary;
+        
+        // Transform backend data to match frontend format
+        const summary = {
+          title: selectedSummaryType === 'monthly' 
+            ? `${months.find(m => m.month_id === summaryMonth + 12)?.month_name || 'Unknown'} ${summaryYear}`
+            : selectedSummaryType === 'yearly'
+            ? `Year ${summaryYear}`
+            : `${new Date(customStartDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} - ${new Date(customEndDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}`,
+          total: backendSummary.total_amount,
+          count: backendSummary.total_count,
+          categoryBreakdown: backendSummary.category_breakdown,
+          monthlyBreakdown: backendSummary.monthly_breakdown,
+          expenses: backendSummary.expenses
+        };
+        
+        setSummaryData(summary);
+        console.log('✅ Used backend API for summary calculation');
+      } else {
+        throw new Error('Backend API not available');
+      }
+    } catch (error) {
+      console.log('⚠️ Backend API not available, using frontend calculation:', error);
+      
+      // Fallback to frontend calculation
+      setTimeout(() => {
+        let summary = null;
+        
+        switch (selectedSummaryType) {
+          case 'monthly':
+            summary = calculateMonthlySummary();
+            break;
+          case 'yearly':
+            summary = calculateYearlySummary();
+            break;
+          case 'custom':
+            summary = calculateCustomDateSummary();
+            break;
+          default:
+            summary = null;
+        }
+        
+        setSummaryData(summary);
+        setSummaryLoading(false);
+      }, 100);
+      return;
+    }
+    
+    setSummaryLoading(false);
+  };
+
 
   // Delete expense from backend
   const handleDeleteExpense = async (monthIdx, expenseId) => {
@@ -1327,6 +1539,427 @@ function App() {
               </div>
             )}
           </div>
+
+          {/* Summary Section */}
+          <div style={{ marginTop: '40px' }}>
+            <h3 style={{
+              color: '#1e293b',
+              fontSize: '18px',
+              fontWeight: '700',
+              marginBottom: '20px',
+              fontFamily: "'Inter', sans-serif"
+            }}>
+              📊 Expense Summary
+            </h3>
+
+            {/* Summary Type Selector */}
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '8px',
+                marginBottom: '16px'
+              }}>
+                {[
+                  { key: 'monthly', label: 'Monthly', icon: '📅' },
+                  { key: 'yearly', label: 'Yearly', icon: '🗓️' },
+                  { key: 'custom', label: 'Custom', icon: '📆' }
+                ].map(({ key, label, icon }) => (
+                  <button
+                    key={key}
+                    onClick={() => setSelectedSummaryType(key)}
+                    style={{
+                      padding: '12px 8px',
+                      borderRadius: '12px',
+                      border: selectedSummaryType === key ? '2px solid #6366f1' : '2px solid #e2e8f0',
+                      background: selectedSummaryType === key ? 'rgba(99, 102, 241, 0.05)' : 'white',
+                      color: selectedSummaryType === key ? '#6366f1' : '#64748b',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease',
+                      fontFamily: "'Inter', sans-serif",
+                      textAlign: 'center'
+                    }}
+                    onMouseOver={(e) => {
+                      if (selectedSummaryType !== key) {
+                        e.target.style.borderColor = '#6366f1';
+                        e.target.style.background = 'rgba(99, 102, 241, 0.02)';
+                      }
+                    }}
+                    onMouseOut={(e) => {
+                      if (selectedSummaryType !== key) {
+                        e.target.style.borderColor = '#e2e8f0';
+                        e.target.style.background = 'white';
+                      }
+                    }}
+                  >
+                    <div>{icon}</div>
+                    <div>{label}</div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Monthly Summary Controls */}
+              {selectedSummaryType === 'monthly' && (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '12px',
+                  marginBottom: '16px'
+                }}>
+                  <select
+                    value={summaryYear}
+                    onChange={e => setSummaryYear(Number(e.target.value))}
+                    style={{
+                      padding: '12px 16px',
+                      borderRadius: '12px',
+                      border: '2px solid #e2e8f0',
+                      background: 'white',
+                      color: '#1e293b',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      outline: 'none',
+                      transition: 'all 0.3s ease',
+                      fontFamily: "'Inter', sans-serif"
+                    }}
+                  >
+                    {[2024, 2025, 2026].map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={summaryMonth}
+                    onChange={e => setSummaryMonth(Number(e.target.value))}
+                    style={{
+                      padding: '12px 16px',
+                      borderRadius: '12px',
+                      border: '2px solid #e2e8f0',
+                      background: 'white',
+                      color: '#1e293b',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      outline: 'none',
+                      transition: 'all 0.3s ease',
+                      fontFamily: "'Inter', sans-serif"
+                    }}
+                  >
+                    {[
+                      { value: 1, name: 'Jan' }, { value: 2, name: 'Feb' }, { value: 3, name: 'Mar' },
+                      { value: 4, name: 'Apr' }, { value: 5, name: 'May' }, { value: 6, name: 'Jun' },
+                      { value: 7, name: 'Jul' }, { value: 8, name: 'Aug' }, { value: 9, name: 'Sep' },
+                      { value: 10, name: 'Oct' }, { value: 11, name: 'Nov' }, { value: 12, name: 'Dec' }
+                    ].map(month => (
+                      <option key={month.value} value={month.value}>{month.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Yearly Summary Controls */}
+              {selectedSummaryType === 'yearly' && (
+                <div style={{ marginBottom: '16px' }}>
+                  <select
+                    value={summaryYear}
+                    onChange={e => setSummaryYear(Number(e.target.value))}
+                    style={{
+                      width: '100%',
+                      padding: '12px 16px',
+                      borderRadius: '12px',
+                      border: '2px solid #e2e8f0',
+                      background: 'white',
+                      color: '#1e293b',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      outline: 'none',
+                      transition: 'all 0.3s ease',
+                      fontFamily: "'Inter', sans-serif"
+                    }}
+                  >
+                    {[2024, 2025, 2026].map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Custom Date Range Controls */}
+              {selectedSummaryType === 'custom' && (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '12px',
+                  marginBottom: '16px'
+                }}>
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      color: '#64748b',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      marginBottom: '4px',
+                      fontFamily: "'Inter', sans-serif"
+                    }}>
+                      From
+                    </label>
+                    <input
+                      type="date"
+                      value={customStartDate}
+                      onChange={e => setCustomStartDate(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '12px 16px',
+                        borderRadius: '12px',
+                        border: '2px solid #e2e8f0',
+                        background: 'white',
+                        color: '#1e293b',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        outline: 'none',
+                        transition: 'all 0.3s ease',
+                        fontFamily: "'Inter', sans-serif",
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{
+                      display: 'block',
+                      color: '#64748b',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      marginBottom: '4px',
+                      fontFamily: "'Inter', sans-serif"
+                    }}>
+                      To
+                    </label>
+                    <input
+                      type="date"
+                      value={customEndDate}
+                      onChange={e => setCustomEndDate(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '12px 16px',
+                        borderRadius: '12px',
+                        border: '2px solid #e2e8f0',
+                        background: 'white',
+                        color: '#1e293b',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        outline: 'none',
+                        transition: 'all 0.3s ease',
+                        fontFamily: "'Inter', sans-serif",
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Generate Summary Button */}
+              <button
+                onClick={generateSummary}
+                disabled={summaryLoading || (selectedSummaryType === 'custom' && (!customStartDate || !customEndDate))}
+                style={{
+                  width: '100%',
+                  padding: '12px 20px',
+                  borderRadius: '12px',
+                  border: 'none',
+                  background: summaryLoading ? '#e2e8f0' : 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+                  color: summaryLoading ? '#94a3b8' : 'white',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: summaryLoading ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.3s ease',
+                  fontFamily: "'Inter', sans-serif",
+                  boxShadow: summaryLoading ? 'none' : '0 4px 6px rgba(34, 197, 94, 0.2)'
+                }}
+                onMouseOver={(e) => {
+                  if (!summaryLoading) {
+                    e.target.style.transform = 'translateY(-2px)';
+                    e.target.style.boxShadow = '0 8px 15px rgba(34, 197, 94, 0.3)';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  if (!summaryLoading) {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = '0 4px 6px rgba(34, 197, 94, 0.2)';
+                  }
+                }}
+              >
+                {summaryLoading ? '⏳ Calculating...' : '📊 Generate Summary'}
+              </button>
+            </div>
+
+            {/* Summary Results */}
+            {summaryData && (
+              <div style={{
+                marginTop: '20px',
+                padding: '20px',
+                background: 'rgba(59, 130, 246, 0.05)',
+                border: '2px solid rgba(59, 130, 246, 0.1)',
+                borderRadius: '16px'
+              }}>
+                <h4 style={{
+                  color: '#1e293b',
+                  fontSize: '16px',
+                  fontWeight: '700',
+                  marginBottom: '16px',
+                  fontFamily: "'Inter', sans-serif"
+                }}>
+                  {summaryData.title}
+                </h4>
+
+                {/* Summary Stats */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '12px',
+                  marginBottom: '16px'
+                }}>
+                  <div style={{
+                    padding: '12px',
+                    background: 'rgba(34, 197, 94, 0.1)',
+                    borderRadius: '12px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{
+                      color: '#16a34a',
+                      fontSize: '18px',
+                      fontWeight: '700',
+                      fontFamily: "'Inter', sans-serif"
+                    }}>
+                      ${summaryData.total.toFixed(2)}
+                    </div>
+                    <div style={{
+                      color: '#64748b',
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      fontFamily: "'Inter', sans-serif"
+                    }}>
+                      Total Spent
+                    </div>
+                  </div>
+                  <div style={{
+                    padding: '12px',
+                    background: 'rgba(168, 85, 247, 0.1)',
+                    borderRadius: '12px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{
+                      color: '#a855f7',
+                      fontSize: '18px',
+                      fontWeight: '700',
+                      fontFamily: "'Inter', sans-serif"
+                    }}>
+                      {summaryData.count}
+                    </div>
+                    <div style={{
+                      color: '#64748b',
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      fontFamily: "'Inter', sans-serif"
+                    }}>
+                      Transactions
+                    </div>
+                  </div>
+                </div>
+
+                {/* Top Categories */}
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{
+                    color: '#64748b',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    marginBottom: '8px',
+                    fontFamily: "'Inter', sans-serif"
+                  }}>
+                    Top Categories
+                  </div>
+                  {Object.entries(summaryData.categoryBreakdown)
+                    .sort(([,a], [,b]) => b.total - a.total)
+                    .slice(0, 3)
+                    .map(([category, data], index) => (
+                      <div key={category} style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '8px 0',
+                        borderBottom: index < 2 ? '1px solid rgba(148, 163, 184, 0.1)' : 'none'
+                      }}>
+                        <span style={{
+                          color: '#1e293b',
+                          fontSize: '13px',
+                          fontWeight: '500',
+                          fontFamily: "'Inter', sans-serif"
+                        }}>
+                          {category}
+                        </span>
+                        <span style={{
+                          color: '#6366f1',
+                          fontSize: '13px',
+                          fontWeight: '600',
+                          fontFamily: "'Inter', sans-serif"
+                        }}>
+                          ${data.total.toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+
+                {/* Monthly Breakdown for Yearly Summary */}
+                {selectedSummaryType === 'yearly' && summaryData.monthlyBreakdown && (
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={{
+                      color: '#64748b',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      marginBottom: '8px',
+                      fontFamily: "'Inter', sans-serif"
+                    }}>
+                      Monthly Breakdown
+                    </div>
+                    <div style={{
+                      maxHeight: '120px',
+                      overflowY: 'auto',
+                      fontSize: '12px'
+                    }}>
+                      {Object.entries(summaryData.monthlyBreakdown)
+                        .filter(([, data]) => data.total > 0)
+                        .map(([month, data], index) => (
+                          <div key={month} style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '4px 0'
+                          }}>
+                            <span style={{
+                              color: '#1e293b',
+                              fontSize: '12px',
+                              fontWeight: '500',
+                              fontFamily: "'Inter', sans-serif"
+                            }}>
+                              {month}
+                            </span>
+                            <span style={{
+                              color: '#6366f1',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              fontFamily: "'Inter', sans-serif"
+                            }}>
+                              ${data.total.toFixed(2)}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Download Options */}
+                {/* Download functionality removed */}
+              </div>
+            )}
+          </div>
         </div>
         {/* Right Panel - Beautiful Light Design */}
         <div style={{
@@ -1334,17 +1967,12 @@ function App() {
           flexDirection: 'column',
           gap: '24px'
         }}>
-          {months.map((monthObj) => {
+          {months.map((monthObj, idx) => {
             const monthId = monthObj.month_id;
             const monthName = monthObj.month_name;
-            
             // Never show loading states for instant display
             const isLoadingMonthlyLimits = false;
-            console.log(`🔍 Month ${monthId}: monthLimits[${monthId}] =`, monthLimits[monthId]);
-            console.log(`🔍 Month ${monthId}: monthLimits full object =`, monthLimits);
             const hasMonthlyLimit = monthLimits[monthId] && monthLimits[monthId] > 0;
-            console.log(`🔍 Month ${monthId}: hasMonthlyLimit =`, hasMonthlyLimit);
-            
             // Always use the best available limit data
             const limit = hasMonthlyLimit ? monthLimits[monthId] : globalLimit;
             const expList = Array.isArray(expenses[`${year}-${monthId}`]) ? expenses[`${year}-${monthId}`] : [];
@@ -1352,33 +1980,35 @@ function App() {
               const price = exp.expense_item_price || 0;
               return sum + (typeof price === 'number' ? price : parseFloat(price) || 0);
             }, 0);
-              const limitExceeded = limit > 0 && total > limit;
-              const progress = limit > 0 ? Math.min((total / limit) * 100, 100) : 0;
-              const isExpanded = showExpenseForm[monthId];
-              
-              return (
-                <div 
-                  key={monthId}
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.9)',
-                    backdropFilter: 'blur(20px)',
-                    border: '1px solid rgba(148, 163, 184, 0.2)',
-                    borderRadius: '24px',
-                    borderLeft: `6px solid ${limitExceeded ? '#ef4444' : limit > 0 ? '#22c55e' : '#94a3b8'}`,
-                    transition: 'all 0.3s ease',
-                    position: 'relative',
-                    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.05), 0 4px 6px rgba(0, 0, 0, 0.02)',
-                    overflow: 'hidden'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-4px)';
-                    e.currentTarget.style.boxShadow = '0 20px 40px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.06)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = '0 10px 25px rgba(0, 0, 0, 0.05), 0 4px 6px rgba(0, 0, 0, 0.02)';
-                  }}
-                >
+            const limitExceeded = limit > 0 && total > limit;
+            const progress = limit > 0 ? Math.min((total / limit) * 100, 100) : 0;
+            const isExpanded = showExpenseForm[monthId];
+            // Add marginBottom except for last card
+            const isLast = idx === months.length - 1;
+            return (
+              <div
+                key={monthId}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.9)',
+                  backdropFilter: 'blur(20px)',
+                  border: '1px solid rgba(148, 163, 184, 0.2)',
+                  borderRadius: '24px',
+                  borderLeft: `6px solid ${limitExceeded ? '#ef4444' : limit > 0 ? '#22c55e' : '#94a3b8'}`,
+                  transition: 'all 0.3s ease',
+                  position: 'relative',
+                  boxShadow: '0 10px 25px rgba(0, 0, 0, 0.05), 0 4px 6px rgba(0, 0, 0, 0.02)',
+                  overflow: 'hidden',
+                  marginBottom: isLast ? 0 : '32px',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-4px)';
+                  e.currentTarget.style.boxShadow = '0 20px 40px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.06)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 10px 25px rgba(0, 0, 0, 0.05), 0 4px 6px rgba(0, 0, 0, 0.02)';
+                }}
+              >
                   {/* Month Header */}
                   <div 
                     onClick={() => handleAddExpense(monthId)}
@@ -1563,7 +2193,7 @@ function App() {
                   {showExpenseForm[monthId] && (
                     <div style={{
                       padding: '40px',
-                      background: 'rgba(0, 0, 0, 0.4)',
+                      background: 'transparent',
                       animation: 'slideDown 0.3s ease-out',
                       display: 'flex',
                       flexDirection: 'column',

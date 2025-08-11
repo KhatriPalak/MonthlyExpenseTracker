@@ -4,3 +4,6 @@ psycopg2-binary
 passlib[bcrypt]
 pyjwt
 uvicorn
+reportlab
+flask
+flask-cors
