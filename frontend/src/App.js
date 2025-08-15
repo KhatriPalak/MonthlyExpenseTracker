@@ -495,12 +495,21 @@ function App() {
 
     const monthName = months.find(m => m.month_id === monthId)?.month_name || 'Unknown';
     
+    // Add limit comparison
+    const monthlyLimit = monthLimits[monthId] || globalLimit;
+    const hasLimit = monthlyLimit > 0;
+    
     return {
       title: `${monthName} ${summaryYear}`,
       total,
       count,
       categoryBreakdown,
-      expenses: monthExpenses
+      expenses: monthExpenses,
+      type: 'monthly',
+      limit: monthlyLimit,
+      hasLimit,
+      limitStatus: hasLimit ? (total <= monthlyLimit ? 'under' : 'over') : null,
+      limitDifference: hasLimit ? Math.abs(total - monthlyLimit) : 0
     };
   };
 
@@ -537,13 +546,22 @@ function App() {
       });
     });
 
+    // Add limit comparison
+    const yearlyLimit = globalLimit * 12; // Global limit multiplied by 12 months
+    const hasLimit = yearlyLimit > 0;
+
     return {
       title: `Year ${summaryYear}`,
       total,
       count,
       categoryBreakdown,
       monthlyBreakdown,
-      expenses: allExpenses
+      expenses: allExpenses,
+      type: 'yearly',
+      limit: yearlyLimit,
+      hasLimit,
+      limitStatus: hasLimit ? (total <= yearlyLimit ? 'under' : 'over') : null,
+      limitDifference: hasLimit ? Math.abs(total - yearlyLimit) : 0
     };
   };
 
@@ -589,7 +607,8 @@ function App() {
       total,
       count,
       categoryBreakdown,
-      expenses: filteredExpenses
+      expenses: filteredExpenses,
+      type: 'custom'
     };
   };
 
@@ -635,8 +654,29 @@ function App() {
           count: backendSummary.total_count,
           categoryBreakdown: backendSummary.category_breakdown,
           monthlyBreakdown: backendSummary.monthly_breakdown,
-          expenses: backendSummary.expenses
+          expenses: backendSummary.expenses,
+          type: selectedSummaryType
         };
+
+        // Add limit comparison for monthly and yearly summaries
+        if (selectedSummaryType === 'monthly') {
+          const monthKey = summaryMonth + 12; // Convert to month_id
+          const monthlyLimit = monthLimits[monthKey] || globalLimit;
+          summary.limit = monthlyLimit;
+          summary.hasLimit = monthlyLimit > 0;
+          if (summary.hasLimit) {
+            summary.limitStatus = summary.total <= monthlyLimit ? 'under' : 'over';
+            summary.limitDifference = Math.abs(summary.total - monthlyLimit);
+          }
+        } else if (selectedSummaryType === 'yearly') {
+          const yearlyLimit = globalLimit * 12; // Global limit multiplied by 12 months
+          summary.limit = yearlyLimit;
+          summary.hasLimit = yearlyLimit > 0;
+          if (summary.hasLimit) {
+            summary.limitStatus = summary.total <= yearlyLimit ? 'under' : 'over';
+            summary.limitDifference = Math.abs(summary.total - yearlyLimit);
+          }
+        }
         
         setSummaryData(summary);
         console.log('✅ Used backend API for summary calculation');
@@ -1989,6 +2029,126 @@ function App() {
                     </div>
                   </div>
                 </div>
+
+                {/* Limit Comparison for Monthly and Yearly */}
+                {(summaryData.type === 'monthly' || summaryData.type === 'yearly') && summaryData.hasLimit && (
+                  <div style={{
+                    padding: '16px',
+                    background: summaryData.limitStatus === 'over' ? 
+                      'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                    border: `2px solid ${summaryData.limitStatus === 'over' ? 
+                      '#ef4444' : '#22c55e'}`,
+                    borderRadius: '12px',
+                    marginBottom: '16px'
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '8px'
+                    }}>
+                      <span style={{
+                        color: '#64748b',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        fontFamily: "'Inter', sans-serif"
+                      }}>
+                        {summaryData.type === 'monthly' ? 'Monthly Limit' : 'Yearly Limit'}
+                      </span>
+                      <span style={{
+                        color: '#1e293b',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        fontFamily: "'Inter', sans-serif"
+                      }}>
+                        {currentCurrencySymbol}{summaryData.limit.toFixed(2)}
+                      </span>
+                    </div>
+                    <div style={{
+                      textAlign: 'center',
+                      color: summaryData.limitStatus === 'over' ? '#dc2626' : '#16a34a',
+                      fontSize: '14px',
+                      fontWeight: '700',
+                      fontFamily: "'Inter', sans-serif"
+                    }}>
+                      {summaryData.limitStatus === 'over' ? '⚠️ Over Budget' : '✅ Within Budget'}
+                    </div>
+                    <div style={{
+                      textAlign: 'center',
+                      color: summaryData.limitStatus === 'over' ? '#dc2626' : '#16a34a',
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      fontFamily: "'Inter', sans-serif",
+                      marginTop: '4px'
+                    }}>
+                      {summaryData.limitStatus === 'over' ? 
+                        `Over by ${currentCurrencySymbol}${summaryData.limitDifference.toFixed(2)}` : 
+                        `Under by ${currentCurrencySymbol}${summaryData.limitDifference.toFixed(2)}`
+                      }
+                    </div>
+                  </div>
+                )}
+
+                {/* No Limit Message for Monthly and Yearly */}
+                {(summaryData.type === 'monthly' || summaryData.type === 'yearly') && !summaryData.hasLimit && (
+                  <div style={{
+                    padding: '16px',
+                    background: 'rgba(148, 163, 184, 0.1)',
+                    border: '2px solid #e2e8f0',
+                    borderRadius: '12px',
+                    marginBottom: '16px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{
+                      color: '#64748b',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      fontFamily: "'Inter', sans-serif"
+                    }}>
+                      💡 No {summaryData.type === 'monthly' ? 'monthly' : 'yearly'} limit set
+                    </div>
+                    <div style={{
+                      color: '#64748b',
+                      fontSize: '12px',
+                      fontWeight: '400',
+                      fontFamily: "'Inter', sans-serif",
+                      marginTop: '4px'
+                    }}>
+                      Set a {summaryData.type === 'monthly' ? 'monthly' : 'global'} limit to track your budget
+                    </div>
+                  </div>
+                )}
+
+                {/* Custom Range Summary Info */}
+                {summaryData.type === 'custom' && (
+                  <div style={{
+                    padding: '16px',
+                    background: 'rgba(59, 130, 246, 0.1)',
+                    border: '2px solid rgba(59, 130, 246, 0.2)',
+                    borderRadius: '12px',
+                    marginBottom: '16px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{
+                      color: '#1e40af',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      fontFamily: "'Inter', sans-serif"
+                    }}>
+                      📊 Custom Period Summary
+                    </div>
+                    <div style={{
+                      color: '#64748b',
+                      fontSize: '12px',
+                      fontWeight: '400',
+                      fontFamily: "'Inter', sans-serif",
+                      marginTop: '4px'
+                    }}>
+                      Total spending: {currentCurrencySymbol}{summaryData.total.toFixed(2)} • 
+                      Total entries: {summaryData.count}
+                    </div>
+                  </div>
+                )}
 
                 {/* Top Categories */}
                 <div style={{ marginBottom: '16px' }}>
