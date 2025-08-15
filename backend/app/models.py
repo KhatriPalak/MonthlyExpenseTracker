@@ -2,6 +2,13 @@ from sqlalchemy import Column, Integer, String, Float, ForeignKey, Date, Boolean
 from sqlalchemy.orm import relationship
 from db import Base
 
+class Currency(Base):
+    __tablename__ = "currency"
+    currency_id = Column(Integer, primary_key=True)
+    currency_name = Column(String(50), nullable=False)
+    currency_symbol = Column(String(10), nullable=False)
+    users = relationship("User", back_populates="currency")
+
 class User(Base):
     __tablename__ = "user"
     user_id = Column(Integer, primary_key=True, autoincrement=True)
@@ -9,9 +16,11 @@ class User(Base):
     password = Column(String(255), nullable=False)
     email = Column(String(120), nullable=False, unique=True)
     global_limit = Column(Float, default=0)
+    currency_id = Column(Integer, ForeignKey("currency.currency_id"), default=1)  # Default to USD
     expenses = relationship("Expense", back_populates="user")
     monthly_limits = relationship("MonthlyLimit", back_populates="user")
     categories = relationship("ExpenseCategory", back_populates="user")
+    currency = relationship("Currency", back_populates="users")
 
 class ExpenseCategory(Base):
     __tablename__ = "expense_category"

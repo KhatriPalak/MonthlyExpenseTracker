@@ -81,6 +81,12 @@ class GlobalLimit(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     value = db.Column(db.Float, nullable=False)
 
+class Currency(db.Model):
+    __tablename__ = "currency"
+    currency_id = db.Column(db.Integer, primary_key=True)
+    currency_name = db.Column(db.String(50), nullable=False)
+    currency_symbol = db.Column(db.String(10), nullable=False)
+
 class User(db.Model):
     __tablename__ = "user"
     user_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -88,6 +94,7 @@ class User(db.Model):
     password = db.Column(db.String(255), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     global_limit = db.Column(db.Float, default=0)
+    currency_id = db.Column(db.Integer, db.ForeignKey('currency.currency_id'), default=1)
 
     def set_password(self, password):
         """Hash and set the password"""
@@ -617,13 +624,18 @@ def get_global_limit():
 def set_global_limit():
     try:
         value = float(request.json['global_limit'])
-        logger.info('Setting global limit to: %s', value)
+        currency_id = request.json.get('currency_id')  # Optional currency_id
+        logger.info('Setting global limit to: %s, currency_id: %s', value, currency_id)
         
         # For now, update user with ID 1 (since we don't have proper authentication yet)
         # In the future, this should use the authenticated user
         user = User.query.filter_by(user_id=1).first()
         if user:
             user.global_limit = value
+            # Update currency if provided
+            if currency_id is not None:
+                user.currency_id = currency_id
+                logger.info('Updated currency for user %s to %s', user.user_id, currency_id)
             db.session.commit()
             logger.info('Updated global limit for user %s to %s', user.user_id, value)
             return jsonify({'success': True})
@@ -847,6 +859,90 @@ def get_expense_summary():
         
     except Exception as e:
         logger.error('Error getting expense summary: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/currencies', methods=['GET'])
+def get_currencies():
+    """Get all available currencies"""
+    try:
+        logger.info('GET /api/currencies called')
+        currencies = Currency.query.all()
+        
+        currency_list = []
+        for currency in currencies:
+            currency_list.append({
+                'currency_id': currency.currency_id,
+                'currency_name': currency.currency_name,
+                'currency_symbol': currency.currency_symbol
+            })
+        
+        logger.info('Retrieved %d currencies', len(currency_list))
+        return jsonify({'currencies': currency_list}), 200
+        
+    except Exception as e:
+        logger.error('Error getting currencies: %s', e)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/user/currency', methods=['POST'])
+def update_user_currency():
+    """Update user's preferred currency"""
+    try:
+        logger.info('POST /api/user/currency called')
+        data = request.get_json()
+        currency_id = data.get('currency_id')
+        
+        if not currency_id:
+            return jsonify({'error': 'Currency ID is required'}), 400
+        
+        # For now, update user with ID 1 (since we don't have proper authentication yet)
+        user = User.query.filter_by(user_id=1).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Verify currency exists
+        currency = Currency.query.filter_by(currency_id=currency_id).first()
+        if not currency:
+            return jsonify({'error': 'Invalid currency ID'}), 400
+        
+        user.currency_id = currency_id
+        db.session.commit()
+        
+        logger.info('Updated user currency to %d', currency_id)
+        return jsonify({'success': True}), 200
+        
+    except Exception as e:
+        logger.error('Error updating user currency: %s', e)
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/user/currency', methods=['GET'])
+def get_user_currency():
+    """Get user's current currency"""
+    try:
+        logger.info('GET /api/user/currency called')
+        
+        # For now, get user with ID 1 (since we don't have proper authentication yet)
+        user = User.query.filter_by(user_id=1).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Get currency details
+        currency = Currency.query.filter_by(currency_id=user.currency_id).first()
+        if not currency:
+            # Default to USD if no currency found
+            currency = Currency.query.filter_by(currency_id=1).first()
+        
+        result = {
+            'currency_id': currency.currency_id if currency else 1,
+            'currency_name': currency.currency_name if currency else 'US Dollar',
+            'currency_symbol': currency.currency_symbol if currency else '$'
+        }
+        
+        logger.info('Retrieved user currency: %s', result)
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error('Error getting user currency: %s', e)
         return jsonify({'error': str(e)}), 500
 
 

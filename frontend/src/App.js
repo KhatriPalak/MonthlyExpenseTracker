@@ -12,6 +12,9 @@ function App() {
 
   // Expense tracker state (moved to top to avoid conditional hooks)
   const [year, setYear] = useState(2025);
+  const [currency, setCurrency] = useState(1); // Store currency_id
+  const [currencies, setCurrencies] = useState([]); // Store available currencies
+  const [currentCurrencySymbol, setCurrentCurrencySymbol] = useState('$'); // Current currency symbol
   const [globalLimit, setGlobalLimit] = useState(0);
   const [tempGlobalLimit, setTempGlobalLimit] = useState(0);
   const [monthLimits, setMonthLimits] = useState({});
@@ -130,6 +133,73 @@ function App() {
       });
   }, [months]);
 
+  // Currency functions
+  const loadCurrencies = async () => {
+    try {
+      console.log('🌍 Loading currencies from database...');
+      const response = await fetch('http://localhost:5000/api/currencies');
+      if (response.ok) {
+        const data = await response.json();
+        setCurrencies(data.currencies || []);
+        console.log('✅ Currencies loaded:', data.currencies?.length || 0);
+      }
+    } catch (error) {
+      console.error('❌ Error loading currencies:', error);
+      // Set default currencies if API fails
+      setCurrencies([
+        { currency_id: 1, currency_name: 'US Dollar', currency_symbol: '$' },
+        { currency_id: 2, currency_name: 'Euro', currency_symbol: '€' },
+        { currency_id: 3, currency_name: 'British Pound Sterling', currency_symbol: '£' }
+      ]);
+    }
+  };
+
+  const loadUserCurrency = async () => {
+    try {
+      console.log('💰 Loading user currency...');
+      const response = await fetch('http://localhost:5000/api/user/currency');
+      if (response.ok) {
+        const data = await response.json();
+        setCurrency(data.currency_id);
+        setCurrentCurrencySymbol(data.currency_symbol);
+        console.log('✅ User currency loaded:', data);
+      }
+    } catch (error) {
+      console.error('❌ Error loading user currency:', error);
+    }
+  };
+
+  const handleCurrencyChange = async (newCurrencyId) => {
+    try {
+      console.log('💱 Changing currency to:', newCurrencyId);
+      const response = await fetch('http://localhost:5000/api/user/currency', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currency_id: parseInt(newCurrencyId) })
+      });
+      
+      if (response.ok) {
+        setCurrency(parseInt(newCurrencyId));
+        // Update currency symbol
+        const selectedCurrency = currencies.find(c => c.currency_id === parseInt(newCurrencyId));
+        if (selectedCurrency) {
+          setCurrentCurrencySymbol(selectedCurrency.currency_symbol);
+        }
+        console.log('✅ Currency updated successfully');
+      }
+    } catch (error) {
+      console.error('❌ Error updating currency:', error);
+    }
+  };
+
+  // Load currencies and user currency on component mount
+  useEffect(() => {
+    loadCurrencies();
+    if (user) {
+      loadUserCurrency();
+    }
+  }, [user]);
+
   // Immediate data fetching - load all data synchronously on user/year change
   useEffect(() => {
     if (!user) return;
@@ -213,7 +283,7 @@ function App() {
               if (monthData.monthly_limit && monthData.monthly_limit > 0) {
                 limitData[monthId] = monthData.monthly_limit;
                 tempLimitData[monthId] = monthData.monthly_limit;
-                console.log(`✅ Monthly limit loaded immediately for month ${monthId}: $${monthData.monthly_limit}`);
+                console.log(`✅ Monthly limit loaded immediately for month ${monthId}: ${currentCurrencySymbol}${monthData.monthly_limit}`);
               }
             } catch (error) {
               console.log('❌ Monthly limit parse error:', error);
@@ -985,29 +1055,32 @@ function App() {
     setTempGlobalLimit(value);
   };
 
-  // Save global limit to backend and update the actual global limit
+  // Save global limit and currency to backend and update the actual global limit
   const saveGlobalLimit = async () => {
     try {
-      console.log('Saving global limit:', tempGlobalLimit);
+      console.log('Saving global limit:', tempGlobalLimit, 'and currency:', currency);
       const response = await fetch('http://localhost:5000/api/global_limit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ global_limit: Number(tempGlobalLimit) })
+        body: JSON.stringify({ 
+          global_limit: Number(tempGlobalLimit),
+          currency_id: currency 
+        })
       });
       
       if (response.ok) {
-        console.log('Global limit saved successfully');
+        console.log('Global limit and currency saved successfully');
         setGlobalLimit(Number(tempGlobalLimit)); // Update the actual global limit used in calculations
-        setGlobalLimitSuccess('Global limit saved successfully!');
+        setGlobalLimitSuccess('Global limit and currency saved successfully!');
         setTimeout(() => setGlobalLimitSuccess(''), 3000); // Clear message after 3 seconds
         // Invalidate cache to ensure fresh data
         invalidateCache();
       } else {
-        throw new Error('Failed to save global limit');
+        throw new Error('Failed to save global limit and currency');
       }
     } catch (error) {
-      console.error('Error saving global limit:', error);
-      setGlobalLimitSuccess('Failed to save global limit');
+      console.error('Error saving global limit and currency:', error);
+      setGlobalLimitSuccess('Failed to save global limit and currency');
       setTimeout(() => setGlobalLimitSuccess(''), 3000);
     }
   };
@@ -1451,6 +1524,58 @@ function App() {
             </select>
           </div>
 
+          {/* Currency Selector */}
+          <div style={{ marginBottom: '40px' }}>
+            <label style={{
+              display: 'block',
+              color: '#475569',
+              fontSize: '14px',
+              fontWeight: '600',
+              marginBottom: '12px',
+              fontFamily: "'Inter', sans-serif"
+            }}>
+              Currency
+            </label>
+            <select 
+              value={currency} 
+              onChange={e => handleCurrencyChange(e.target.value)}
+              style={{
+                width: '100%',
+                background: 'white',
+                border: '2px solid #e2e8f0',
+                borderRadius: '16px',
+                padding: '16px 20px',
+                color: '#1e293b',
+                fontSize: '16px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                outline: 'none',
+                transition: 'all 0.3s ease',
+                fontFamily: "'Inter', sans-serif",
+                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)',
+                boxSizing: 'border-box'
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = '#6366f1';
+                e.target.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.1)';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = '#e2e8f0';
+                e.target.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.02)';
+              }}
+            >
+              {currencies.map(curr => (
+                <option 
+                  key={curr.currency_id} 
+                  value={curr.currency_id} 
+                  style={{ background: 'white', color: '#1e293b' }}
+                >
+                  {curr.currency_name} ({curr.currency_symbol})
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Global Limit */}
           <div>
             <label style={{
@@ -1465,7 +1590,7 @@ function App() {
             </label>
             <input 
               type="number" 
-              placeholder="Enter amount..." 
+              placeholder={globalLimit > 0 ? `Current: ${currentCurrencySymbol}${globalLimit}` : "Enter amount..."} 
               min="0" 
               step="0.01" 
               value={tempGlobalLimit} 
@@ -1519,7 +1644,7 @@ function App() {
                 e.target.style.boxShadow = '0 4px 6px rgba(99, 102, 241, 0.2)';
               }}
             >
-              Save Global Limit
+              Save Global Limit & Currency
             </button>
             {globalLimitSuccess && (
               <div style={{
@@ -1829,7 +1954,7 @@ function App() {
                       fontWeight: '700',
                       fontFamily: "'Inter', sans-serif"
                     }}>
-                      ${summaryData.total.toFixed(2)}
+                      {currentCurrencySymbol}{summaryData.total.toFixed(2)}
                     </div>
                     <div style={{
                       color: '#64748b',
@@ -1901,7 +2026,7 @@ function App() {
                           fontWeight: '600',
                           fontFamily: "'Inter', sans-serif"
                         }}>
-                          ${data.total.toFixed(2)}
+                          {currentCurrencySymbol}{data.total.toFixed(2)}
                         </span>
                       </div>
                     ))}
@@ -1947,7 +2072,7 @@ function App() {
                               fontWeight: '600',
                               fontFamily: "'Inter', sans-serif"
                             }}>
-                              ${data.total.toFixed(2)}
+                              {currentCurrencySymbol}{data.total.toFixed(2)}
                             </span>
                           </div>
                         ))}
@@ -2047,7 +2172,7 @@ function App() {
                             color: limitExceeded ? '#ef4444' : '#1e293b',
                             fontFamily: "'Inter', sans-serif"
                           }}>
-                            ${!isNaN(Number(total)) ? Number(total).toFixed(2) : '0.00'}
+                            {currentCurrencySymbol}{!isNaN(Number(total)) ? Number(total).toFixed(2) : '0.00'}
                           </div>
                         </div>
 
@@ -2111,7 +2236,7 @@ function App() {
                                   Loading...
                                 </span>
                               ) : (
-                                limit > 0 ? `$${limit.toFixed(2)}` : 'No Limit'
+                                limit > 0 ? `${currentCurrencySymbol}${limit.toFixed(2)}` : 'No Limit'
                               )}
                             </div>
                             {!isLoadingMonthlyLimits && hasMonthlyLimit && (
@@ -2154,7 +2279,7 @@ function App() {
                             }}>
                               {dataLoading ? 'Loading...' : 
                                 (limit > 0 ? 
-                                  (limitExceeded ? `Over by $${(total - limit).toFixed(2)}` : `Under by $${(limit - total).toFixed(2)}`) 
+                                  (limitExceeded ? `Over by ${currentCurrencySymbol}${(total - limit).toFixed(2)}` : `Under by ${currentCurrencySymbol}${(limit - total).toFixed(2)}`) 
                                   : 'No Tracking'
                                 )
                               }
@@ -2236,7 +2361,7 @@ function App() {
                             </label>
                             <input 
                               type="number" 
-                              placeholder={globalLimit > 0 ? `Global: $${globalLimit}` : "Enter amount..."} 
+                              placeholder={globalLimit > 0 ? `Global: ${currentCurrencySymbol}${globalLimit}` : "Enter amount..."} 
                               value={tempMonthLimits[monthId] || ''} 
                               onChange={e => handleLimitChange(monthId, e.target.value)}
                               style={{
@@ -2328,7 +2453,7 @@ function App() {
                             fontSize: '14px',
                             fontFamily: "'Inter', sans-serif"
                           }}>
-                            Using global limit: ${globalLimit}
+                            Using global limit: {currentCurrencySymbol}{globalLimit}
                           </div>
                         )}
                         
@@ -2993,7 +3118,7 @@ function App() {
                                         textAlign: 'right',
                                         fontFamily: "'Inter', sans-serif"
                                       }}>
-                                        ${!isNaN(amountNum) ? amountNum.toFixed(2) : '0.00'}
+                                        {currentCurrencySymbol}{!isNaN(amountNum) ? amountNum.toFixed(2) : '0.00'}
                                       </div>
                                       <button 
                                         title="Delete expense" 
