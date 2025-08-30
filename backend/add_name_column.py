@@ -189,18 +189,23 @@ def seed_initial_data():
             "Personal Care", "Home & Garden", "Gifts & Donations", "Other"
         ]
         
-        cur.execute("SELECT COUNT(*) FROM expense_category WHERE user_id IS NULL")
-        category_count = cur.fetchone()['count']
+        # Get existing categories
+        cur.execute("SELECT expense_category_name FROM expense_category WHERE user_id IS NULL AND is_deleted = FALSE")
+        existing_categories = [row['expense_category_name'] for row in cur.fetchall()]
         
-        if category_count == 0:
-            for category_name in default_categories:
+        # Find missing categories
+        missing_categories = [cat for cat in default_categories if cat not in existing_categories]
+        
+        if missing_categories:
+            logger.info(f"📝 Adding {len(missing_categories)} missing categories: {missing_categories}")
+            for category_name in missing_categories:
                 cur.execute(
                     "INSERT INTO expense_category (expense_category_name, user_id, is_deleted) VALUES (%s, %s, %s)",
                     (category_name, None, False)
                 )
-            logger.info(f"✅ Inserted {len(default_categories)} default categories")
+            logger.info(f"✅ Added {len(missing_categories)} missing default categories")
         else:
-            logger.info("ℹ️ Default categories already exist in database")
+            logger.info("ℹ️ All default categories already exist in database")
         
         # Create a default user if none exists
         cur.execute("SELECT COUNT(*) FROM \"user\"")
@@ -327,15 +332,28 @@ def verify_migration_complete():
         cur.execute("SELECT COUNT(*) FROM month")
         month_count = cur.fetchone()['count']
         
-        cur.execute("SELECT COUNT(*) FROM expense_category WHERE user_id IS NULL")
+        cur.execute("SELECT COUNT(*) FROM expense_category WHERE user_id IS NULL AND is_deleted = FALSE")
         category_count = cur.fetchone()['count']
         
         if month_count != 12:
             logger.error(f"❌ Expected 12 months, found {month_count}")
             return False
         
-        if category_count < 10:
-            logger.error(f"❌ Expected at least 10 default categories, found {category_count}")
+        if category_count < 12:
+            logger.error(f"❌ Expected 12 default categories, found {category_count}")
+            # Let's see which ones are missing
+            cur.execute("SELECT expense_category_name FROM expense_category WHERE user_id IS NULL AND is_deleted = FALSE ORDER BY expense_category_name")
+            existing_cats = [row['expense_category_name'] for row in cur.fetchall()]
+            logger.info(f"ℹ️ Existing categories: {existing_cats}")
+            
+            expected_cats = [
+                "Food & Dining", "Transportation", "Shopping", "Entertainment",
+                "Bills & Utilities", "Healthcare", "Education", "Travel",
+                "Personal Care", "Home & Garden", "Gifts & Donations", "Other"
+            ]
+            missing_cats = [cat for cat in expected_cats if cat not in existing_cats]
+            logger.info(f"ℹ️ Missing categories: {missing_cats}")
+            
             return False
         
         logger.info("✅ Data integrity checks passed")

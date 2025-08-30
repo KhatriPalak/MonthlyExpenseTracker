@@ -5,7 +5,7 @@ Quick test script for PDF download functionality
 import requests
 import os
 
-BASE_URL = "http://localhost:5000"
+BASE_URL = "http://3.141.164.136:5000"
 
 def test_pdf_download():
     """Test the PDF download endpoint"""
@@ -50,7 +50,7 @@ def test_pdf_download():
             print(f"❌ Request failed: {response.text}")
             
     except requests.exceptions.ConnectionError:
-        print("❌ Connection error. Make sure the backend server is running on localhost:5000")
+        print("❌ Connection error. Make sure the backend server is running on 3.141.164.136:5000")
     except Exception as e:
         print(f"❌ Error: {e}")
 

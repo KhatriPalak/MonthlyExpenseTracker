@@ -3,7 +3,7 @@ import json
 
 def test_summary_endpoints():
     """Test the new summary endpoints"""
-    base_url = "http://localhost:5000"
+    base_url = "http://3.141.164.136:5000"
     
     print("🧪 Testing Summary Endpoints")
     print("=" * 50)
@@ -59,6 +59,6 @@ if __name__ == "__main__":
         test_summary_endpoints()
     except requests.exceptions.ConnectionError:
         print("❌ Cannot connect to backend server")
-        print("💡 Make sure your Flask server is running on http://localhost:5000")
+        print("💡 Make sure your Flask server is running on http://3.141.164.136:5000")
     except Exception as e:
         print(f"❌ Test failed: {e}")

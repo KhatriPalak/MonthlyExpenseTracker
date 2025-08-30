@@ -2,7 +2,7 @@ import requests
 
 # Test category deletion
 def test_category_deletion():
-    base_url = "http://localhost:5000"
+    base_url = "http://3.141.164.136:5000"
     
     # First get all categories
     print("1. Getting all categories...")

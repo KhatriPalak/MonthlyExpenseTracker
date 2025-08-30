@@ -5,7 +5,7 @@ Test script for the download summary API endpoint
 import requests
 import json
 
-BASE_URL = "http://localhost:5000"
+BASE_URL = "http://3.141.164.136:5000"
 
 def test_download_api():
     """Test the download summary API with different parameters"""

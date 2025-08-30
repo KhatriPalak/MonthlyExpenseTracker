@@ -3,7 +3,7 @@ import json
 
 def test_category_operations():
     """Test category creation and deletion"""
-    base_url = "http://localhost:5000"
+    base_url = "http://3.141.164.136:5000"
     
     print("🧪 Testing Category Operations")
     print("=" * 40)
@@ -71,6 +71,6 @@ if __name__ == "__main__":
         test_category_operations()
     except requests.exceptions.ConnectionError:
         print("❌ Cannot connect to backend server")
-        print("💡 Make sure your Flask server is running on http://localhost:5000")
+        print("💡 Make sure your Flask server is running on http://3.141.164.136:5000")
     except Exception as e:
         print(f"❌ Test failed: {e}")
