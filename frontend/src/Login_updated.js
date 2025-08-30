@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import './Auth.css';
+import { API_CONFIG } from './config/api';
 
-import { API_CONFIG, buildUrl } from './config/api';
-const Login = ({ onLogin, onSwitchToSignup }) => {
+const Login = ({ onLogin }) => {
   const [formData, setFormData] = useState({
     email: '',
     password: ''
@@ -15,11 +14,11 @@ const Login = ({ onLogin, onSwitchToSignup }) => {
       ...formData,
       [e.target.name]: e.target.value
     });
-    setError(''); // Clear error when user types
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
     console.log('Login: Form submitted with data:', formData);
     
     if (!formData.email || !formData.password) {
@@ -32,31 +31,31 @@ const Login = ({ onLogin, onSwitchToSignup }) => {
       console.log('Login: Making POST request to /api/auth/login');
       const response = await fetch(API_CONFIG.ENDPOINTS.LOGIN, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: API_CONFIG.HEADERS,
         body: JSON.stringify({
           email: formData.email,
           password: formData.password
         })
       });
 
-      console.log('Login: Response status:', response.status);
+      console.log('Login: Response status:', response.status, response.statusText);
+      console.log('Login: Response headers:', [...response.headers.entries()]);
+      
       const data = await response.json();
       console.log('Login: Response data:', data);
-
+      
       if (response.ok) {
-        // Store user data in localStorage
+        console.log('Login: Success! User:', data.user);
         localStorage.setItem('user', JSON.stringify(data.user));
         localStorage.setItem('token', data.token);
-        console.log('Login: Success, calling onLogin');
         onLogin(data.user);
       } else {
-        setError(data.error || 'Login failed');
+        console.log('Login: Failed with error:', data.error);
+        setError(data.error || 'Invalid email or password');
       }
-    } catch (error) {
-      console.error('Login: Error:', error);
-      setError('Network error. Please try again.');
+    } catch (err) {
+      console.log('Login: Error:', err);
+      setError('Unable to connect to server. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -65,11 +64,12 @@ const Login = ({ onLogin, onSwitchToSignup }) => {
   return (
     <div className="auth-container">
       <div className="auth-card">
-        <h1 className="auth-title">💰 Expense Tracker</h1>
-        <h2 className="auth-subtitle">Welcome Back</h2>
-        <p className="auth-description">Sign in to manage your expenses</p>
+        <h2>Welcome Back</h2>
+        <p className="auth-subtitle">Login to manage your expenses</p>
         
-        <form onSubmit={handleSubmit} className="auth-form">
+        {error && <div className="error-message">{error}</div>}
+        
+        <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="email">Email</label>
             <input
@@ -82,7 +82,7 @@ const Login = ({ onLogin, onSwitchToSignup }) => {
               required
             />
           </div>
-          
+
           <div className="form-group">
             <label htmlFor="password">Password</label>
             <input
@@ -95,29 +95,11 @@ const Login = ({ onLogin, onSwitchToSignup }) => {
               required
             />
           </div>
-          
-          {error && <div className="error-message">{error}</div>}
-          
-          <button 
-            type="submit" 
-            className="auth-button"
-            disabled={loading}
-          >
-            {loading ? 'Signing In...' : 'Sign In'}
+
+          <button type="submit" className="auth-button" disabled={loading}>
+            {loading ? 'Logging in...' : 'Login'}
           </button>
         </form>
-        
-        <div className="auth-switch">
-          <p>Don't have an account? 
-            <button 
-              type="button" 
-              className="switch-button"
-              onClick={onSwitchToSignup}
-            >
-              Sign Up
-            </button>
-          </p>
-        </div>
       </div>
     </div>
   );

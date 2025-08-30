@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import './Auth.css';
 
+import { API_CONFIG, buildUrl } from './config/api';
 const Signup = ({ onSignup, onSwitchToLogin }) => {
   const [formData, setFormData] = useState({
     name: '',
@@ -49,7 +50,7 @@ const Signup = ({ onSignup, onSwitchToLogin }) => {
     setLoading(true);
     try {
       console.log('Signup: Making POST request to /api/auth/signup');
-      const response = await fetch('http://3.141.164.136:5000/api/auth/signup', {
+      const response = await fetch(API_CONFIG.ENDPOINTS.SIGNUP, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

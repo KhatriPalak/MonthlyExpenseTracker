@@ -4,6 +4,7 @@ import './App.css';
 import Login from './Login';
 import Signup from './Signup';
 
+import { API_CONFIG, buildUrl } from './config/api';
 function App() {
   // Authentication state
   const [user, setUser] = useState(null);
@@ -52,18 +53,18 @@ function App() {
   
   // Initialize months immediately with default data for instant display
   const [months, setMonths] = useState([
-    { month_id: 13, month_name: "January" },
-    { month_id: 14, month_name: "February" },
-    { month_id: 15, month_name: "March" },
-    { month_id: 16, month_name: "April" },
-    { month_id: 17, month_name: "May" },
-    { month_id: 18, month_name: "June" },
-    { month_id: 19, month_name: "July" },
-    { month_id: 20, month_name: "August" },
-    { month_id: 21, month_name: "September" },
-    { month_id: 22, month_name: "October" },
-    { month_id: 23, month_name: "November" },
-    { month_id: 24, month_name: "December" }
+    { month_id: 1, month_name: "January" },
+    { month_id: 2, month_name: "February" },
+    { month_id: 3, month_name: "March" },
+    { month_id: 4, month_name: "April" },
+    { month_id: 5, month_name: "May" },
+    { month_id: 6, month_name: "June" },
+    { month_id: 7, month_name: "July" },
+    { month_id: 8, month_name: "August" },
+    { month_id: 9, month_name: "September" },
+    { month_id: 10, month_name: "October" },
+    { month_id: 11, month_name: "November" },
+    { month_id: 12, month_name: "December" }
   ]);
 
   // Check for existing authentication on app load and initialize cached data
@@ -110,7 +111,7 @@ function App() {
     }
     
     // Fetch fresh months data in background (non-blocking)
-    fetch('http://3.141.164.136:5000/api/months', {
+    fetch(API_CONFIG.ENDPOINTS.MONTHS, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(2000)
@@ -131,13 +132,13 @@ function App() {
         localStorage.setItem('cached_months', JSON.stringify(months));
         localStorage.setItem('cached_months_timestamp', now.toString());
       });
-  }, [months]);
+  }, []); // Empty dependency array - only run once on mount
 
   // Currency functions
   const loadCurrencies = async () => {
     try {
       console.log('🌍 Loading currencies from database...');
-      const response = await fetch('http://3.141.164.136:5000/api/currencies');
+      const response = await fetch(API_CONFIG.ENDPOINTS.CURRENCIES);
       if (response.ok) {
         const data = await response.json();
         setCurrencies(data.currencies || []);
@@ -157,7 +158,11 @@ function App() {
   const loadUserCurrency = async () => {
     try {
       console.log('💰 Loading user currency...');
-      const response = await fetch('http://3.141.164.136:5000/api/user/currency');
+      const response = await fetch(API_CONFIG.ENDPOINTS.USER_CURRENCY, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
       if (response.ok) {
         const data = await response.json();
         setCurrency(data.currency_id);
@@ -172,7 +177,7 @@ function App() {
   const handleCurrencyChange = async (newCurrencyId) => {
     try {
       console.log('💱 Changing currency to:', newCurrencyId);
-      const response = await fetch('http://3.141.164.136:5000/api/user/currency', {
+      const response = await fetch(API_CONFIG.ENDPOINTS.USER_CURRENCY, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currency_id: parseInt(newCurrencyId) })
@@ -218,35 +223,47 @@ function App() {
         // Create all API calls to run in parallel for fastest loading
         console.log('🚀 Starting parallel fetch of all data from PostgreSQL...');
         
-        const globalLimitPromise = fetch('http://3.141.164.136:5000/api/global_limit', {
+        const token = localStorage.getItem('token');
+        const globalLimitPromise = fetch(API_CONFIG.ENDPOINTS.GLOBAL_LIMIT, {
           method: 'GET',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': token ? `Bearer ${token}` : ''
+          },
           signal: AbortSignal.timeout(8000)
         });
         
         // Create all monthly limit fetch promises
         const monthLimitPromises = months.map(monthObj => 
-          fetch(`http://3.141.164.136:5000/api/limit?year=${year}&month=${monthObj.month_id}`, {
+          fetch(buildUrl(API_CONFIG.ENDPOINTS.MONTHLY_LIMIT, { year, month: monthObj.month_id }), {
             method: 'GET',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': token ? `Bearer ${token}` : ''
+            },
             signal: AbortSignal.timeout(8000)
           }).then(response => ({ monthId: monthObj.month_id, response }))
         );
         
         // Create all expense fetch promises
         const expensePromises = months.map(monthObj => {
-          const calendarMonth = monthObj.month_id - 12; // Convert database month_id (13-24) to calendar month (1-12)
-          return fetch(`http://3.141.164.136:5000/api/expenses?year=${year}&month=${calendarMonth}`, {
+          return fetch(buildUrl(API_CONFIG.ENDPOINTS.EXPENSES, { year, month: monthObj.month_id }), {
             method: 'GET',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': token ? `Bearer ${token}` : ''
+            },
             signal: AbortSignal.timeout(8000)
           }).then(response => ({ monthId: monthObj.month_id, response }))
         });
         
         // Fetch categories
-        const categoriesPromise = fetch('http://3.141.164.136:5000/api/categories', {
+        const categoriesPromise = fetch(API_CONFIG.ENDPOINTS.CATEGORIES, {
           method: 'GET',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': token ? `Bearer ${token}` : ''
+          },
           signal: AbortSignal.timeout(8000)
         });
         
@@ -280,10 +297,11 @@ function App() {
             try {
               const { monthId, response } = result.value;
               const monthData = await response.json();
-              if (monthData.monthly_limit && monthData.monthly_limit > 0) {
-                limitData[monthId] = monthData.monthly_limit;
-                tempLimitData[monthId] = monthData.monthly_limit;
-                console.log(`✅ Monthly limit loaded immediately for month ${monthId}: ${currentCurrencySymbol}${monthData.monthly_limit}`);
+              // Backend returns 'limit', not 'monthly_limit'
+              if (monthData.limit && monthData.limit > 0) {
+                limitData[monthId] = monthData.limit;
+                tempLimitData[monthId] = monthData.limit.toString();
+                console.log(`✅ Monthly limit loaded immediately for month ${monthId}: ${currentCurrencySymbol}${monthData.limit}`);
               }
             } catch (error) {
               console.log('❌ Monthly limit parse error:', error);
@@ -300,8 +318,11 @@ function App() {
         if (categoriesResponse.status === 'fulfilled') {
           try {
             const categoriesData = await categoriesResponse.value.json();
+            console.log('✅ Categories loaded from API:', categoriesData.categories);
             setCategories(categoriesData.categories || []);
-            console.log('✅ Categories loaded:', categoriesData.categories);
+            // Make categories available globally for debugging
+            window.debugCategories = categoriesData.categories || [];
+            console.log('Categories set in state, you can check window.debugCategories');
           } catch (error) {
             console.log('❌ Categories parse error:', error);
           }
@@ -382,14 +403,24 @@ function App() {
     try {
       console.log(`App: Refreshing expenses for month ${monthId}`);
       console.log(`App: Current year: ${year}`);
-      console.log(`App: Expense key will be: ${year}-${monthId}`);
-      const calendarMonth = monthId - 12; // Convert database month_id (13-24) to calendar month (1-12)
-      const res = await fetch(`http://3.141.164.136:5000/api/expenses?year=${year}&month=${calendarMonth}`);
+      
+      // monthId is already the actual month (1-12), no conversion needed
+      const token = localStorage.getItem('token');
+      const res = await fetch(buildUrl(API_CONFIG.ENDPOINTS.EXPENSES, { year, month: monthId }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        }
+      });
       const data = await res.json();
       console.log(`App: Refreshed expenses for month ${monthId}:`, data);
-      console.log(`App: Setting expenses with key: ${year}-${monthId}`);
+      
+      // Store with the same key format used elsewhere in the app
+      const expenseKey = `${year}-${monthId}`;
+      console.log(`App: Setting expenses with key: ${expenseKey}`);
+      
       setExpenses(exp => {
-        const newExpenses = { ...exp, [`${year}-${monthId}`]: data };
+        const newExpenses = { ...exp, [expenseKey]: data };
         console.log(`App: Updated expenses state:`, newExpenses);
         return newExpenses;
       });
@@ -475,7 +506,7 @@ function App() {
 
   // Summary calculation functions
   const calculateMonthlySummary = () => {
-    const monthId = summaryMonth + 12; // Convert calendar month to database month_id
+    const monthId = summaryMonth; // Month is already 1-12
     const expenseKey = `${summaryYear}-${monthId}`;
     const monthExpenses = expenses[expenseKey] || [];
     
@@ -617,7 +648,7 @@ function App() {
     
     try {
       // Try to use backend API for more accurate data
-      let apiUrl = 'http://3.141.164.136:5000/api/summary';
+      let apiUrl = API_CONFIG.ENDPOINTS.SUMMARY;
       let params = new URLSearchParams();
       
       params.append('type', selectedSummaryType);
@@ -637,7 +668,13 @@ function App() {
         params.append('end_date', customEndDate);
       }
       
-      const response = await fetch(`${apiUrl}?${params.toString()}`);
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${apiUrl}?${params.toString()}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        }
+      });
       
       if (response.ok) {
         const data = await response.json();
@@ -646,7 +683,7 @@ function App() {
         // Transform backend data to match frontend format
         const summary = {
           title: selectedSummaryType === 'monthly' 
-            ? `${months.find(m => m.month_id === summaryMonth + 12)?.month_name || 'Unknown'} ${summaryYear}`
+            ? `${months.find(m => m.month_id === summaryMonth)?.month_name || 'Unknown'} ${summaryYear}`
             : selectedSummaryType === 'yearly'
             ? `Year ${summaryYear}`
             : `${new Date(customStartDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} - ${new Date(customEndDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}`,
@@ -660,7 +697,7 @@ function App() {
 
         // Add limit comparison for monthly and yearly summaries
         if (selectedSummaryType === 'monthly') {
-          const monthKey = summaryMonth + 12; // Convert to month_id
+          const monthKey = summaryMonth; // Month is already 1-12
           const monthlyLimit = monthLimits[monthKey] || globalLimit;
           summary.limit = monthlyLimit;
           summary.hasLimit = monthlyLimit > 0;
@@ -719,9 +756,13 @@ function App() {
     if (!expenseId) return;
     try {
       console.log(`App: Deleting expense ${expenseId} from month ${monthIdx}`);
-      const response = await fetch('http://3.141.164.136:5000/api/expenses', {
+      const token = localStorage.getItem('token');
+      const response = await fetch(API_CONFIG.ENDPOINTS.EXPENSES, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
         body: JSON.stringify({ expense_id: expenseId })
       });
       
@@ -752,8 +793,10 @@ function App() {
 
   // Submit new expense to backend
   const handleExpenseSubmit = async (monthIdx) => {
-    console.log('handleExpenseSubmit: Starting with monthIdx:', monthIdx);
+    console.log('===== EXPENSE SUBMIT START =====');
+    console.log('handleExpenseSubmit: monthIdx parameter:', monthIdx);
     console.log('handleExpenseSubmit: Current year:', year);
+    console.log('handleExpenseSubmit: Month should be between 1-12. Is it?', monthIdx >= 1 && monthIdx <= 12);
     console.log('handleExpenseSubmit: Current expenseFormData:', expenseFormData);
     
     const form = expenseFormData[monthIdx] || {};
@@ -775,9 +818,13 @@ function App() {
           console.log('Creating new category in database:', tempCategory.category_name);
           
           // Create the category in the database first
-          const categoryResponse = await fetch('http://3.141.164.136:5000/api/categories', {
+          const token = localStorage.getItem('token');
+          const categoryResponse = await fetch(API_CONFIG.ENDPOINTS.CATEGORIES, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': token ? `Bearer ${token}` : ''
+            },
             body: JSON.stringify({ category_name: tempCategory.category_name })
           });
           
@@ -815,13 +862,20 @@ function App() {
     console.log('handleExpenseSubmit: Prepared expense object:', expense);
     
     const requestBody = { year, month: monthIdx, expense };
-    console.log('handleExpenseSubmit: Request body:', JSON.stringify(requestBody, null, 2));
+    console.log('handleExpenseSubmit: Request body being sent to backend:', JSON.stringify(requestBody, null, 2));
+    console.log('handleExpenseSubmit: Specifically - year:', requestBody.year, 'month:', requestBody.month);
     
     try {
       console.log('handleExpenseSubmit: Making POST request to /api/expenses');
-      const response = await fetch('http://3.141.164.136:5000/api/expenses', {
+      const token = localStorage.getItem('token');
+      console.log('handleExpenseSubmit: Token:', token ? `Bearer ${token.substring(0, 20)}...` : 'NO TOKEN');
+      
+      const response = await fetch(API_CONFIG.ENDPOINTS.EXPENSES, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
         body: JSON.stringify(requestBody)
       });
       
@@ -883,14 +937,19 @@ function App() {
 
   // Handle category selection from suggestions
   const handleCategorySelect = (monthId, category) => {
+    console.log('handleCategorySelect called with:', { monthId, category });
     setCategoryInput(prev => ({ ...prev, [monthId]: category.category_name }));
-    setExpenseFormData(form => ({
-      ...form,
-      [monthId]: {
-        ...form[monthId],
-        category: category.category_id
-      }
-    }));
+    setExpenseFormData(form => {
+      const updatedForm = {
+        ...form,
+        [monthId]: {
+          ...form[monthId],
+          category: category.category_id
+        }
+      };
+      console.log('Updated expense form data:', updatedForm);
+      return updatedForm;
+    });
     setShowCategorySuggestions(prev => ({ ...prev, [monthId]: false }));
   };
 
@@ -920,9 +979,14 @@ function App() {
         // Delete from database
         console.log('Deleting category from database:', categoryName);
         
-        const response = await fetch(`http://3.141.164.136:5000/api/categories/${categoryId}`, {
+        const token = localStorage.getItem('token');
+        const response = await fetch(API_CONFIG.ENDPOINTS.CATEGORIES, {
           method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': token ? `Bearer ${token}` : ''
+          },
+          body: JSON.stringify({ category_id: categoryId })
         });
 
         if (!response.ok) {
@@ -1025,9 +1089,13 @@ function App() {
     if (!categoryName.trim()) return;
 
     try {
-      const response = await fetch('http://3.141.164.136:5000/api/categories', {
+      const token = localStorage.getItem('token');
+      const response = await fetch(API_CONFIG.ENDPOINTS.CATEGORIES, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
         body: JSON.stringify({ category_name: categoryName.trim() })
       });
 
@@ -1098,25 +1166,43 @@ function App() {
   // Save global limit and currency to backend and update the actual global limit
   const saveGlobalLimit = async () => {
     try {
+      console.log('=== SAVING GLOBAL LIMIT START ===');
+      console.log('Current user:', user);
       console.log('Saving global limit:', tempGlobalLimit, 'and currency:', currency);
-      const response = await fetch('http://3.141.164.136:5000/api/global_limit', {
+      
+      const token = localStorage.getItem('token');
+      console.log('Token from localStorage:', token ? `Bearer ${token.substring(0, 20)}...` : 'NO TOKEN FOUND');
+      
+      const requestBody = { 
+        global_limit: Number(tempGlobalLimit),
+        currency_id: currency 
+      };
+      console.log('Request body:', requestBody);
+      console.log('API endpoint:', API_CONFIG.ENDPOINTS.GLOBAL_LIMIT);
+      
+      const response = await fetch(API_CONFIG.ENDPOINTS.GLOBAL_LIMIT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          global_limit: Number(tempGlobalLimit),
-          currency_id: currency 
-        })
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
+        body: JSON.stringify(requestBody)
       });
       
+      console.log('Response status:', response.status);
+      const responseData = await response.json();
+      console.log('Response data:', responseData);
+      
       if (response.ok) {
-        console.log('Global limit and currency saved successfully');
+        console.log('✅ Global limit and currency saved successfully');
         setGlobalLimit(Number(tempGlobalLimit)); // Update the actual global limit used in calculations
         setGlobalLimitSuccess('Global limit and currency saved successfully!');
         setTimeout(() => setGlobalLimitSuccess(''), 3000); // Clear message after 3 seconds
         // Invalidate cache to ensure fresh data
         invalidateCache();
       } else {
-        throw new Error('Failed to save global limit and currency');
+        console.error('❌ Failed to save:', responseData);
+        throw new Error(responseData.error || 'Failed to save global limit and currency');
       }
     } catch (error) {
       console.error('Error saving global limit and currency:', error);
@@ -1141,12 +1227,13 @@ function App() {
       for (const monthObj of months) {
         const monthId = monthObj.month_id;
         try {
-          const monthResponse = await fetch(`http://3.141.164.136:5000/api/limit?year=${year}&month=${monthId}`, {
+          const monthResponse = await fetch(buildUrl(API_CONFIG.ENDPOINTS.MONTHLY_LIMIT, { year, month: monthId }), {
             signal: AbortSignal.timeout(5000)
           });
           
           if (monthResponse.ok) {
             const monthData = await monthResponse.json();
+            console.log(`Monthly limit response for month ${monthId}:`, monthData);
             if (monthData.limit > 0) {
               limitData[monthId] = monthData.limit;
               tempLimitData[monthId] = monthData.limit.toString();
@@ -1174,9 +1261,13 @@ function App() {
       const requestData = { year, month: monthIdx, limit: 0 };
       console.log('App: Sending POST to /api/limit to clear limit:', requestData);
       
-      const response = await fetch('http://3.141.164.136:5000/api/limit', {
+      const token = localStorage.getItem('token');
+      const response = await fetch(API_CONFIG.ENDPOINTS.MONTHLY_LIMIT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
         body: JSON.stringify(requestData)
       });
       
@@ -1242,9 +1333,13 @@ function App() {
       const requestData = { year, month: monthIdx, limit: limitValue };
       console.log('App: Sending POST to /api/limit with data:', requestData);
       
-      const response = await fetch('http://3.141.164.136:5000/api/limit', {
+      const token = localStorage.getItem('token');
+      const response = await fetch(API_CONFIG.ENDPOINTS.MONTHLY_LIMIT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
         body: JSON.stringify(requestData)
       });
       
@@ -2793,7 +2888,7 @@ function App() {
                                 <option value="" disabled>Select {monthName} date...</option>
                                 {(() => {
                                   // Generate all dates for the current month
-                                  const monthIndex = monthId - 13; // monthId starts at 13 for January
+                                  const monthIndex = monthId - 1; // monthId is 1-12, JavaScript months are 0-11
                                   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
                                   const dates = [];
                                   
