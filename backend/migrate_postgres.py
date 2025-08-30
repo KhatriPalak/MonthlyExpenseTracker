@@ -147,7 +147,7 @@ if __name__ == "__main__":
     
     if success:
         print("\n✨ Migration completed successfully!")
-        print("🔧 Backend: http://localhost:5000")
+        print("🔧 Backend: http://3.141.164.136:5000")
         print("🌐 Frontend: http://localhost:3001")
         print("📊 You can now test user-specific categories!")
     else:

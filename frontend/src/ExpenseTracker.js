@@ -8,7 +8,7 @@ const ExpenseTracker = ({ year = 2025, month = new Date().getMonth() + 1, refres
   useEffect(() => {
     console.log(`ExpenseTracker: Starting fetch for year=${year}, month=${month}`);
     setLoading(true);
-    fetch(`http://localhost:5000/api/expenses?year=${year}&month=${month}`)
+    fetch(`http://3.141.164.136:5000/api/expenses?year=${year}&month=${month}`)
       .then((res) => {
         console.log('ExpenseTracker: Response status:', res.status, res.statusText);
         console.log('ExpenseTracker: Response headers:', [...res.headers.entries()]);

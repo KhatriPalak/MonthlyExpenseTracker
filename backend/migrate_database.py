@@ -96,7 +96,7 @@ if __name__ == "__main__":
     if success:
         print("\n✨ Migration completed! Your database is ready.")
         print("🌐 Frontend: http://localhost:3001")
-        print("🔧 Backend: http://localhost:5000")
+        print("🔧 Backend: http://3.141.164.136:5000")
     else:
         print("\n❌ Migration failed. Please check the error messages above.")
         

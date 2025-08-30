@@ -105,7 +105,7 @@ function App() {
     }
     
     // Fetch fresh months data in background (non-blocking)
-    fetch('http://localhost:5000/api/months', {
+    fetch('http://3.141.164.136:5000/api/months', {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(2000)
@@ -139,7 +139,7 @@ function App() {
         // Create all API calls to run in parallel for fastest loading
         console.log('🚀 Starting parallel fetch of all data from PostgreSQL...');
         
-        const globalLimitPromise = fetch('http://localhost:5000/api/global_limit', {
+        const globalLimitPromise = fetch('http://3.141.164.136:5000/api/global_limit', {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(8000)
@@ -147,7 +147,7 @@ function App() {
         
         // Create all monthly limit fetch promises
         const monthLimitPromises = months.map(monthObj => 
-          fetch(`http://localhost:5000/api/limit?year=${year}&month=${monthObj.month_id}`, {
+          fetch(`http://3.141.164.136:5000/api/limit?year=${year}&month=${monthObj.month_id}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' },
             signal: AbortSignal.timeout(8000)
@@ -156,7 +156,7 @@ function App() {
         
         // Create all expense fetch promises
         const expensePromises = months.map(monthObj => 
-          fetch(`http://localhost:5000/api/expenses?year=${year}&month=${monthObj.month_id}`, {
+          fetch(`http://3.141.164.136:5000/api/expenses?year=${year}&month=${monthObj.month_id}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' },
             signal: AbortSignal.timeout(8000)
@@ -272,7 +272,7 @@ function App() {
       console.log(`App: Refreshing expenses for month ${monthId}`);
       console.log(`App: Current year: ${year}`);
       console.log(`App: Expense key will be: ${year}-${monthId}`);
-      const res = await fetch(`http://localhost:5000/api/expenses?year=${year}&month=${monthId}`);
+      const res = await fetch(`http://3.141.164.136:5000/api/expenses?year=${year}&month=${monthId}`);
       const data = await res.json();
       console.log(`App: Refreshed expenses for month ${monthId}:`, data);
       console.log(`App: Setting expenses with key: ${year}-${monthId}`);
@@ -291,7 +291,7 @@ function App() {
         for (const monthObj of months) {
           const monthId = monthObj.month_id;
           try {
-            const expenseResponse = await fetch(`http://localhost:5000/api/expenses?year=${year}&month=${monthId}`, {
+            const expenseResponse = await fetch(`http://3.141.164.136:5000/api/expenses?year=${year}&month=${monthId}`, {
               method: 'GET',
               headers: { 'Content-Type': 'application/json' },
               signal: AbortSignal.timeout(5000)
@@ -355,7 +355,7 @@ function App() {
       console.log(`App: Refreshing expenses for month ${monthId}`);
       console.log(`App: Current year: ${year}`);
       console.log(`App: Expense key will be: ${year}-${monthId}`);
-      const res = await fetch(`http://localhost:5000/api/expenses?year=${year}&month=${monthId}`);
+      const res = await fetch(`http://3.141.164.136:5000/api/expenses?year=${year}&month=${monthId}`);
       const data = await res.json();
       console.log(`App: Refreshed expenses for month ${monthId}:`, data);
       console.log(`App: Setting expenses with key: ${year}-${monthId}`);
@@ -433,7 +433,7 @@ function App() {
     if (!expenseId) return;
     try {
       console.log(`App: Deleting expense ${expenseId} from month ${monthIdx}`);
-      const response = await fetch('http://localhost:5000/api/expenses', {
+      const response = await fetch('http://3.141.164.136:5000/api/expenses', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ expense_id: expenseId })
@@ -492,7 +492,7 @@ function App() {
     
     try {
       console.log('handleExpenseSubmit: Making POST request to /api/expenses');
-      const response = await fetch('http://localhost:5000/api/expenses', {
+      const response = await fetch('http://3.141.164.136:5000/api/expenses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody)
@@ -540,7 +540,7 @@ function App() {
   const saveGlobalLimit = async () => {
     try {
       console.log('Saving global limit:', tempGlobalLimit);
-      const response = await fetch('http://localhost:5000/api/global_limit', {
+      const response = await fetch('http://3.141.164.136:5000/api/global_limit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ global_limit: Number(tempGlobalLimit) })
@@ -579,7 +579,7 @@ function App() {
       for (const monthObj of months) {
         const monthId = monthObj.month_id;
         try {
-          const monthResponse = await fetch(`http://localhost:5000/api/limit?year=${year}&month=${monthId}`, {
+          const monthResponse = await fetch(`http://3.141.164.136:5000/api/limit?year=${year}&month=${monthId}`, {
             signal: AbortSignal.timeout(5000)
           });
           
@@ -612,7 +612,7 @@ function App() {
       const requestData = { year, month: monthIdx, limit: 0 };
       console.log('App: Sending POST to /api/limit to clear limit:', requestData);
       
-      const response = await fetch('http://localhost:5000/api/limit', {
+      const response = await fetch('http://3.141.164.136:5000/api/limit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestData)
@@ -677,7 +677,7 @@ function App() {
       const requestData = { year, month: monthIdx, limit: limitValue };
       console.log('App: Sending POST to /api/limit with data:', requestData);
       
-      const response = await fetch('http://localhost:5000/api/limit', {
+      const response = await fetch('http://3.141.164.136:5000/api/limit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestData)

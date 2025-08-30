@@ -49,7 +49,7 @@ const Signup = ({ onSignup, onSwitchToLogin }) => {
     setLoading(true);
     try {
       console.log('Signup: Making POST request to /api/auth/signup');
-      const response = await fetch('http://localhost:5000/api/auth/signup', {
+      const response = await fetch('http://3.141.164.136:5000/api/auth/signup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
