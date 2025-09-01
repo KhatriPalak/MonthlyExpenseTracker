@@ -64,6 +64,7 @@ class Expense(db.Model):
     __tablename__ = "expense"
     expense_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.user_id'), nullable=False)
+    expense_name = db.Column(db.String(200), nullable=True)  # New column for expense name
     expense_item_price = db.Column(db.Float, nullable=False)
     expense_category_id = db.Column(db.Integer, db.ForeignKey('expense_category.expense_category_id'), nullable=False)
     expense_description = db.Column(db.String(255))
@@ -120,7 +121,7 @@ def verify_token(token):
         return None
 
 def get_current_user_id():
-    """Get current user ID from token or return default"""
+    """Get current user ID from token"""
     auth_header = request.headers.get('Authorization')
     logger.info(f'get_current_user_id - Auth header: {auth_header[:50] if auth_header else "None"}')
     
@@ -138,8 +139,8 @@ def get_current_user_id():
     else:
         logger.warning('get_current_user_id - No valid auth header found!')
     
-    logger.warning('get_current_user_id - Returning default user ID: 1')
-    return 1  # Default user for now
+    logger.error('get_current_user_id - No authenticated user found')
+    return None  # No default user - authentication required
 
 # ===================== AUTHENTICATION ENDPOINTS =====================
 
@@ -249,6 +250,9 @@ def get_expenses():
         month = request.args.get('month', type=int)
         user_id = get_current_user_id()
         
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
+        
         if not year or not month:
             return jsonify({'error': 'Year and month are required'}), 400
         
@@ -271,6 +275,7 @@ def get_expenses():
             category = ExpenseCategory.query.get(expense.expense_category_id)
             expenses_data.append({
                 'expense_id': expense.expense_id,
+                'expense_name': expense.expense_name or '',  # Include expense name
                 'expense_item_price': expense.expense_item_price,
                 'expense_category_id': expense.expense_category_id,
                 'expense_category_name': category.expense_category_name if category else 'Unknown',
@@ -295,6 +300,10 @@ def add_expense():
         month = data.get('month')
         expense_data = data.get('expense', {})
         user_id = get_current_user_id()
+        
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
+            
         logger.info(f'Expense data: {expense_data}')
         
         if not all([year, month, expense_data]):
@@ -317,9 +326,13 @@ def add_expense():
         if not amount:
             return jsonify({'error': 'Amount is required'}), 400
         
+        # Get expense name - frontend sends 'name'
+        expense_name = expense_data.get('name') or expense_data.get('expense_name', '')
+        
         # Create new expense
         new_expense = Expense(
             user_id=user_id,
+            expense_name=expense_name,  # Save the expense name
             expense_item_price=float(amount),
             expense_category_id=int(category_id),
             expense_description=expense_data.get('description') or expense_data.get('expense_description', ''),
@@ -347,6 +360,9 @@ def delete_expense():
         data = request.get_json()
         expense_id = data.get('expense_id')
         user_id = get_current_user_id()
+        
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
         
         if not expense_id:
             return jsonify({'error': 'Expense ID is required'}), 400
@@ -377,6 +393,10 @@ def get_global_limit():
     """Get user's global spending limit"""
     try:
         user_id = get_current_user_id()
+        
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
+            
         user = User.query.get(user_id)
         
         if not user:
@@ -408,8 +428,8 @@ def set_global_limit():
         user_id = get_current_user_id()
         logger.info(f'Extracted user_id from token: {user_id}')
         
-        if user_id == 1:
-            logger.warning('⚠️ Using DEFAULT USER ID (1) - Token may be invalid or missing!')
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
         
         logger.info(f'Setting global limit: {global_limit}, currency_id: {currency_id} for user_id: {user_id}')
         
@@ -456,6 +476,9 @@ def get_monthly_limit():
         month = request.args.get('month', type=int)
         user_id = get_current_user_id()
         
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
+        
         if not year or not month:
             return jsonify({'error': 'Year and month are required'}), 400
         
@@ -488,6 +511,9 @@ def set_monthly_limit():
         month = data.get('month')
         limit = data.get('limit')
         user_id = get_current_user_id()
+        
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
         
         if not all([year, month]) or limit is None:
             return jsonify({'error': 'Year, month, and limit are required'}), 400
@@ -585,6 +611,9 @@ def update_user_currency():
         currency_id = data.get('currency_id') if data else None
         user_id = get_current_user_id()
         
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
+        
         user = User.query.get(user_id)
         if not user:
             return jsonify({'error': 'User not found'}), 404
@@ -630,6 +659,9 @@ def get_categories():
     """Get all expense categories"""
     try:
         user_id = get_current_user_id()
+        
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
         
         # Get both global and user-specific categories
         categories = ExpenseCategory.query.filter(
@@ -681,6 +713,9 @@ def add_category():
         category_name = data.get('category_name')
         user_id = get_current_user_id()
         
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
+        
         if not category_name:
             return jsonify({'error': 'Category name is required'}), 400
         
@@ -725,6 +760,9 @@ def delete_category():
         data = request.get_json()
         category_id = data.get('category_id')
         user_id = get_current_user_id()
+        
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
         
         if not category_id:
             return jsonify({'error': 'Category ID is required'}), 400
@@ -812,6 +850,9 @@ def get_summary():
         year = request.args.get('year', type=int)
         month = request.args.get('month', type=int)
         user_id = get_current_user_id()
+        
+        if user_id is None:
+            return jsonify({'error': 'Authentication required'}), 401
         
         if summary_type == 'monthly' and year and month:
             # Get monthly summary
@@ -908,23 +949,89 @@ if __name__ == '__main__':
             db.create_all()
             logger.info('Database tables created successfully')
             
-            # Ensure default user exists
-            default_user = User.query.filter_by(email='user@example.com').first()
-            if not default_user:
-                default_user = User(
-                    username='default_user',
-                    name='Default User',
-                    email='user@example.com',
-                    password=pwd_context.hash('password123'),
-                    global_limit=0,
-                    currency_id=1
-                )
-                db.session.add(default_user)
+            # Initialize currencies if not present
+            currency_count = Currency.query.count()
+            if currency_count == 0:
+                logger.info('Adding currencies...')
+                currencies = [
+                    Currency(currency_id=1, currency_name="USD", currency_symbol="$"),
+                    Currency(currency_id=2, currency_name="EUR", currency_symbol="€"),
+                    Currency(currency_id=3, currency_name="GBP", currency_symbol="£"),
+                    Currency(currency_id=4, currency_name="JPY", currency_symbol="¥"),
+                    Currency(currency_id=5, currency_name="CAD", currency_symbol="C$"),
+                    Currency(currency_id=6, currency_name="AUD", currency_symbol="A$"),
+                    Currency(currency_id=7, currency_name="CHF", currency_symbol="Fr"),
+                    Currency(currency_id=8, currency_name="CNY", currency_symbol="¥"),
+                    Currency(currency_id=9, currency_name="INR", currency_symbol="₹"),
+                    Currency(currency_id=10, currency_name="MXN", currency_symbol="$"),
+                ]
+                db.session.add_all(currencies)
                 db.session.commit()
-                logger.info('Default user created')
+                logger.info(f'Added {len(currencies)} currencies')
+            
+            # Initialize months if not present
+            month_count = Month.query.count()
+            if month_count == 0:
+                logger.info('Adding months...')
+                months = [
+                    Month(month_id=1, month_name="January"),
+                    Month(month_id=2, month_name="February"),
+                    Month(month_id=3, month_name="March"),
+                    Month(month_id=4, month_name="April"),
+                    Month(month_id=5, month_name="May"),
+                    Month(month_id=6, month_name="June"),
+                    Month(month_id=7, month_name="July"),
+                    Month(month_id=8, month_name="August"),
+                    Month(month_id=9, month_name="September"),
+                    Month(month_id=10, month_name="October"),
+                    Month(month_id=11, month_name="November"),
+                    Month(month_id=12, month_name="December"),
+                ]
+                db.session.add_all(months)
+                db.session.commit()
+                logger.info(f'Added {len(months)} months')
+            
+            # Initialize years if not present
+            year_count = Year.query.count()
+            if year_count == 0:
+                logger.info('Adding years...')
+                years = [
+                    Year(year_id=1, year_number=2024),
+                    Year(year_id=2, year_number=2025),
+                    Year(year_id=3, year_number=2026),
+                ]
+                db.session.add_all(years)
+                db.session.commit()
+                logger.info(f'Added {len(years)} years')
+            
+            # Initialize default categories if not present
+            category_count = ExpenseCategory.query.filter_by(user_id=None).count()
+            if category_count == 0:
+                logger.info('Adding default expense categories...')
+                categories = [
+                    ExpenseCategory(expense_category_name="Food & Dining", user_id=None, is_deleted=False),
+                    ExpenseCategory(expense_category_name="Transportation", user_id=None, is_deleted=False),
+                    ExpenseCategory(expense_category_name="Shopping", user_id=None, is_deleted=False),
+                    ExpenseCategory(expense_category_name="Entertainment", user_id=None, is_deleted=False),
+                    ExpenseCategory(expense_category_name="Bills & Utilities", user_id=None, is_deleted=False),
+                    ExpenseCategory(expense_category_name="Healthcare", user_id=None, is_deleted=False),
+                    ExpenseCategory(expense_category_name="Education", user_id=None, is_deleted=False),
+                    ExpenseCategory(expense_category_name="Travel", user_id=None, is_deleted=False),
+                    ExpenseCategory(expense_category_name="Other", user_id=None, is_deleted=False),
+                ]
+                db.session.add_all(categories)
+                db.session.commit()
+                logger.info(f'Added {len(categories)} default categories')
+            
+            # No default user - users must sign up
+            user_count = User.query.count()
+            if user_count == 0:
+                logger.info('No users found - users will be created through signup')
+            else:
+                logger.info(f'Found {user_count} existing users')
             
         except Exception as e:
-            logger.error(f'Error creating database tables: {e}')
+            logger.error(f'Error initializing database: {e}')
     
     port = int(os.getenv('PORT', 5002))
     host = os.getenv('HOST', '0.0.0.0')

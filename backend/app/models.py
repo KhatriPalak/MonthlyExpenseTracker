@@ -58,6 +58,7 @@ class Expense(Base):
     __tablename__ = "expense"
     expense_id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("user.user_id"), nullable=False)
+    expense_name = Column(String(200), nullable=True)  # New column for expense name
     expense_item_price = Column(Float, nullable=False)
     expense_category_id = Column(Integer, ForeignKey("expense_category.expense_category_id"), nullable=False)
     expense_description = Column(String(255))

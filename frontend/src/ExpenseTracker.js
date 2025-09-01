@@ -42,7 +42,7 @@ const ExpenseTracker = ({ year = 2025, month = new Date().getMonth() + 1, refres
           <thead>
             <tr>
               <th>ID</th>
-              <th>User ID</th>
+              <th>Name</th>
               <th>Category</th>
               <th>Price</th>
               <th>Date</th>
@@ -64,8 +64,8 @@ const ExpenseTracker = ({ year = 2025, month = new Date().getMonth() + 1, refres
               return (
                 <tr key={expense.expense_id ?? Math.random()}>
                   <td>{expense?.expense_id ?? '-'}</td>
-                  <td>{expense?.user_id ?? '-'}</td>
-                  <td>{expense?.expense_category_id ?? '-'}</td>
+                  <td>{expense?.expense_name ?? '-'}</td>
+                  <td>{expense?.expense_category_name ?? '-'}</td>
                   <td>{priceNum.toFixed(2)}</td>
                   <td>{expense?.expenditure_date ? expense.expenditure_date.split('T')[0] : '-'}</td>
                   <td>{expense?.expense_description ?? '-'}</td>

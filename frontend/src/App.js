@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import './App.css';
 import Login from './Login';
 import Signup from './Signup';
+import Modal from './Modal';
 
 import { API_CONFIG, buildUrl } from './config/api';
 function App() {
@@ -50,6 +51,18 @@ function App() {
   const [customEndDate, setCustomEndDate] = useState('');
   const [summaryData, setSummaryData] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  
+  // Alert Modal states
+  const [modalState, setModalState] = useState({
+    show: false,
+    title: '',
+    message: '',
+    type: 'info',
+    onConfirm: null
+  });
+  
+  // Delete expense confirmation state
+  const [expenseToDelete, setExpenseToDelete] = useState(null);
   
   // Initialize months immediately with default data for instant display
   const [months, setMonths] = useState([
@@ -429,6 +442,47 @@ function App() {
     }
   };
 
+  // Delete expense function
+  const handleDeleteExpense = async (expenseId, monthId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(buildUrl(API_CONFIG.ENDPOINTS.EXPENSES), {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
+        body: JSON.stringify({ expense_id: expenseId })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to delete expense: ${errorText}`);
+      }
+
+      // Refresh expenses for the month
+      await refreshExpensesForMonth(monthId);
+      showSuccessModal('Expense deleted successfully');
+      setExpenseToDelete(null);
+    } catch (error) {
+      console.error('Error deleting expense:', error);
+      showErrorModal(`Failed to delete expense: ${error.message}`);
+    }
+  };
+
+  // Show delete confirmation modal
+  const confirmDeleteExpense = (expenseId, expenseName, monthId) => {
+    setExpenseToDelete({ id: expenseId, name: expenseName, monthId });
+    showConfirmModal(
+      'Delete Expense',
+      `Are you sure you want to delete the expense "${expenseName || 'Unnamed expense'}"?`,
+      () => {
+        handleDeleteExpense(expenseId, monthId);
+        hideModal();
+      }
+    );
+  };
+
   // Authentication handlers
   // Authentication handlers
   const handleLogin = (userData) => {
@@ -479,6 +533,39 @@ function App() {
     });
     
     setUser(null);
+  };
+
+  // Modal helper functions
+  const showModal = (title, message, type = 'info', onConfirm = null) => {
+    setModalState({
+      show: true,
+      title,
+      message,
+      type,
+      onConfirm
+    });
+  };
+
+  const hideModal = () => {
+    setModalState({
+      show: false,
+      title: '',
+      message: '',
+      type: 'info',
+      onConfirm: null
+    });
+  };
+
+  const showSuccessModal = (message) => {
+    showModal('Success', message, 'success');
+  };
+
+  const showErrorModal = (message) => {
+    showModal('Error', message, 'error');
+  };
+
+  const showConfirmModal = (title, message, onConfirm) => {
+    showModal(title, message, 'confirm', onConfirm);
   };
 
   // Helper function to invalidate cached data
@@ -751,34 +838,6 @@ function App() {
   };
 
 
-  // Delete expense from backend
-  const handleDeleteExpense = async (monthIdx, expenseId) => {
-    if (!expenseId) return;
-    try {
-      console.log(`App: Deleting expense ${expenseId} from month ${monthIdx}`);
-      const token = localStorage.getItem('token');
-      const response = await fetch(API_CONFIG.ENDPOINTS.EXPENSES, {
-        method: 'DELETE',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': token ? `Bearer ${token}` : ''
-        },
-        body: JSON.stringify({ expense_id: expenseId })
-      });
-      
-      if (response.ok) {
-        console.log(`App: Expense ${expenseId} deleted successfully`);
-        // Invalidate cache to ensure fresh data
-        invalidateCache();
-        // Refresh expenses for this month
-        await refreshExpensesForMonth(monthIdx);
-      } else {
-        console.error('App: Failed to delete expense:', response.status);
-      }
-    } catch (error) {
-      console.error('App: Error deleting expense:', error);
-    }
-  };
 
   // Handle expense form input changes
   const handleExpenseInputChange = (monthIdx, field, value) => {
@@ -804,7 +863,7 @@ function App() {
     
     if (!form.name || !form.amount || !form.date || !form.category) {
       console.error('handleExpenseSubmit: Missing required fields:', { name: form.name, amount: form.amount, date: form.date, category: form.category });
-      alert('Please fill in all required fields (including category)');
+      showErrorModal('Please fill in all required fields (including category)');
       return;
     }
     
@@ -846,7 +905,7 @@ function App() {
           
         } catch (error) {
           console.error('Error creating category:', error);
-          alert(`Failed to create category: ${error.message}`);
+          showErrorModal(`Failed to create category: ${error.message}`);
           return;
         }
       }
@@ -904,12 +963,12 @@ function App() {
       console.log('handleExpenseSubmit: Expenses refreshed successfully');
       
       // Show success message
-      alert('Expense saved successfully!');
+      showSuccessModal('Expense saved successfully!');
       
     } catch (error) {
       console.error('handleExpenseSubmit: Error occurred:', error);
       console.error('handleExpenseSubmit: Error stack:', error.stack);
-      alert(`Failed to save expense: ${error.message}`);
+      showErrorModal(`Failed to save expense: ${error.message}`);
     }
   };
 
@@ -1020,7 +1079,7 @@ function App() {
 
     } catch (error) {
       console.error('Error deleting category:', error);
-      alert(`Failed to delete category: ${error.message}`);
+      showErrorModal(`Failed to delete category: ${error.message}`);
     }
   };
 
@@ -1051,7 +1110,7 @@ function App() {
     );
 
     if (existingCategory) {
-      alert('Category already exists!');
+      showErrorModal('Category already exists!');
       return;
     }
 
@@ -1119,11 +1178,11 @@ function App() {
         console.log('Category added successfully:', result.category);
       } else {
         const error = await response.json();
-        alert(`Failed to add category: ${error.error}`);
+        showErrorModal(`Failed to add category: ${error.error}`);
       }
     } catch (error) {
       console.error('Error adding category:', error);
-      alert('Failed to add category. Please try again.');
+      showErrorModal('Failed to add category. Please try again.');
     }
   };
 
@@ -2643,62 +2702,68 @@ function App() {
                             />
                           </div>
                           
-                          <button 
-                            onClick={() => saveMonthlyLimit(monthId)}
-                            style={{
-                              background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                              border: 'none',
-                              borderRadius: '12px',
-                              padding: '16px 20px',
-                              color: 'white',
-                              fontSize: '14px',
-                              fontWeight: '600',
-                              cursor: 'pointer',
-                              transition: 'all 0.3s ease',
-                              fontFamily: "'Inter', sans-serif",
-                              boxShadow: '0 4px 6px rgba(99, 102, 241, 0.2)'
-                            }}
-                            onMouseOver={(e) => {
-                              e.target.style.transform = 'translateY(-2px)';
-                              e.target.style.boxShadow = '0 8px 15px rgba(99, 102, 241, 0.3)';
-                            }}
-                            onMouseOut={(e) => {
-                              e.target.style.transform = 'translateY(0)';
-                              e.target.style.boxShadow = '0 4px 6px rgba(99, 102, 241, 0.2)';
-                            }}
-                          >
-                            Save
-                          </button>
-                          
-                          {hasMonthlyLimit && (
+                          <div style={{
+                            display: 'flex',
+                            gap: '12px',
+                            marginTop: '20px'
+                          }}>
                             <button 
-                              onClick={() => clearMonthlyLimit(monthId)}
+                              onClick={() => saveMonthlyLimit(monthId)}
                               style={{
-                                background: 'transparent',
-                                border: '2px solid #ef4444',
+                                background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                                border: 'none',
                                 borderRadius: '12px',
                                 padding: '16px 20px',
-                                color: '#ef4444',
+                                color: 'white',
                                 fontSize: '14px',
                                 fontWeight: '600',
                                 cursor: 'pointer',
                                 transition: 'all 0.3s ease',
-                                fontFamily: "'Inter', sans-serif"
+                                fontFamily: "'Inter', sans-serif",
+                                boxShadow: '0 4px 6px rgba(99, 102, 241, 0.2)'
                               }}
                               onMouseOver={(e) => {
-                                e.target.style.background = '#ef4444';
-                                e.target.style.color = 'white';
                                 e.target.style.transform = 'translateY(-2px)';
+                                e.target.style.boxShadow = '0 8px 15px rgba(99, 102, 241, 0.3)';
                               }}
                               onMouseOut={(e) => {
-                                e.target.style.background = 'transparent';
-                                e.target.style.color = '#ef4444';
                                 e.target.style.transform = 'translateY(0)';
+                                e.target.style.boxShadow = '0 4px 6px rgba(99, 102, 241, 0.2)';
                               }}
                             >
-                              Clear
+                              Save
                             </button>
-                          )}
+                            
+                            {hasMonthlyLimit && (
+                              <button 
+                                onClick={() => clearMonthlyLimit(monthId)}
+                                style={{
+                                  background: 'transparent',
+                                  border: '2px solid #ef4444',
+                                  borderRadius: '12px',
+                                  padding: '16px 20px',
+                                  color: '#ef4444',
+                                  fontSize: '14px',
+                                  fontWeight: '600',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.3s ease',
+                                  fontFamily: "'Inter', sans-serif"
+                                }}
+                                onMouseOver={(e) => {
+                                  e.target.style.background = '#ef4444';
+                                  e.target.style.color = 'white';
+                                  e.target.style.transform = 'translateY(-2px)';
+                                }}
+                                onMouseOut={(e) => {
+                                  e.target.style.background = 'transparent';
+                                  e.target.style.color = '#ef4444';
+                                  e.target.style.transform = 'translateY(0)';
+                                }}
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
                         </div>
                         
                         {!hasMonthlyLimit && globalLimit > 0 && (
@@ -3316,9 +3381,8 @@ function App() {
                               {expList.map((exp, i) => {
                                 if (!exp || typeof exp !== 'object') return null;
                                 const amountNum = Number(exp.expense_item_price || 0);
-                                const fullDescription = exp.expense_description || 'Unknown';
-                                const [name, ...descParts] = fullDescription.split(' - ');
-                                const description = descParts.join(' - ') || 'No description';
+                                const name = exp.expense_name || 'Unknown';
+                                const description = exp.expense_description || 'No description';
                                 const date = exp.expenditure_date ? exp.expenditure_date.split('T')[0] : 'No date';
                                 
                                 return (
@@ -3377,7 +3441,7 @@ function App() {
                                       </div>
                                       <button 
                                         title="Delete expense" 
-                                        onClick={() => handleDeleteExpense(monthId, exp.expense_id)}
+                                        onClick={() => confirmDeleteExpense(exp.expense_id, exp.expense_name || 'Unnamed expense', monthId)}
                                         style={{
                                           width: '36px',
                                           height: '36px',
@@ -3699,6 +3763,18 @@ function App() {
         </div>
       )}
     </div>
+    
+    {/* Modal Component */}
+    <Modal
+      show={modalState.show}
+      onClose={hideModal}
+      title={modalState.title}
+      message={modalState.message}
+      type={modalState.type}
+      onConfirm={modalState.onConfirm}
+      confirmText={modalState.type === 'confirm' ? 'Delete' : 'OK'}
+      cancelText="Cancel"
+    />
     </>
   );
 }
