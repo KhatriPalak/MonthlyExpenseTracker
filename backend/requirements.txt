@@ -2,8 +2,10 @@ fastapi
 sqlalchemy
 psycopg2-binary
 passlib[bcrypt]
+python-dotenv
 pyjwt
 uvicorn
 reportlab
 flask
 flask-cors
+Flask-SQLAlchemy
