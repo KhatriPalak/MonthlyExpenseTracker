@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
+import json
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from passlib.context import CryptContext
@@ -54,7 +55,7 @@ class User(db.Model):
     __tablename__ = "user"
     user_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     username = db.Column(db.String(50), nullable=False, unique=True)
-    password = db.Column(db.String(255), nullable=False)
+    password = db.Column(db.String(255), nullable=True)  # Made nullable for Google OAuth
     email = db.Column(db.String(120), unique=True, nullable=False)
     global_limit = db.Column(db.Float, default=0)
     currency_id = db.Column(db.Integer, db.ForeignKey('currency.currency_id'), default=1)
@@ -142,103 +143,107 @@ def get_current_user_id():
     logger.error('get_current_user_id - No authenticated user found')
     return None  # No default user - authentication required
 
+from authlib.integrations.flask_client import OAuth
+from flask import url_for, session
+
+# ===================== OAUTH 2.0 CONFIGURATION =====================
+
+# Initialize OAuth
+oauth = OAuth(app)
+
+# Configure Google OAuth
+oauth.register(
+    name='google',
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
+)
+
+# ===================== NEW GOOGLE AUTHENTICATION ENDPOINTS =====================
+
+@app.route('/login/google')
+def google_login():
+    """Redirects to Google's authorization screen"""
+    redirect_uri = url_for('google_auth', _external=True)
+    # Ensure the redirect URI is HTTPS for production
+    if 'http://' in redirect_uri and 'localhost' not in redirect_uri:
+        redirect_uri = redirect_uri.replace('http://', 'https://')
+    return oauth.google.authorize_redirect(redirect_uri)
+
+@app.route('/auth/google')
+def google_auth():
+    """Callback route for Google OAuth"""
+    try:
+        token = oauth.google.authorize_access_token()
+        user_info = token.get('userinfo')
+
+        if user_info:
+            email = user_info.get('email')
+            name = user_info.get('name')
+            
+            # Find or create the user in the database
+            user = User.query.filter_by(email=email).first()
+            if not user:
+                # Create a new user for Google sign-ins
+                username = email.split('@')[0]
+                counter = 1
+                while User.query.filter_by(username=username).first():
+                    username = f"{email.split('@')[0]}{counter}"
+                    counter += 1
+
+                user = User(
+                    username=username,
+                    email=email,
+                    name=name,
+                    # Password is not set for OAuth users
+                )
+                db.session.add(user)
+                db.session.commit()
+
+            # Create a JWT token for the user to use with the API
+            jwt_token = create_access_token({
+                'user_id': user.user_id,
+                'username': user.username,
+                'email': user.email
+            })
+            
+            # Create a user data dictionary to pass to the frontend
+            user_data = {
+                'id': user.user_id,
+                'name': user.name,
+                'email': user.email
+            }
+
+            # Redirect user back to the frontend with token and user data in query parameters
+            # The frontend will have a component at /auth/callback to parse these parameters
+            if 'localhost' in request.host_url or '127.0.0.1' in request.host_url:
+                # For local development, redirect to the local React server (usually on port 3000)
+                frontend_callback_url = 'http://localhost:3000/auth/callback'
+            else:
+                # For production, use the live domain
+                frontend_callback_url = 'https://monthlyexpensetracker.online/auth/callback'
+
+            return redirect(f"{frontend_callback_url}?token={jwt_token}&user={json.dumps(user_data)}")
+
+    except Exception as e:
+        logger.error(f"Error during Google OAuth callback: {e}")
+        db.session.rollback()
+
+        if 'mismatching_state' in str(e):
+            if 'localhost' in request.host_url or '127.0.0.1' in request.host_url:
+                frontend_login_url = 'http://localhost:3000/login'
+            else:
+                frontend_login_url = 'https://monthlyexpensetracker.online/login'
+            return redirect(f"{frontend_login_url}?error=mismatching_state")
+        
+        return jsonify({'error': 'Authentication failed', 'details': str(e)}), 500
+
 # ===================== AUTHENTICATION ENDPOINTS =====================
 
-@app.route('/api/auth/signup', methods=['POST'])
-def signup():
-    """User registration endpoint"""
-    try:
-        data = request.get_json()
-        name = data.get('name')
-        email = data.get('email')
-        password = data.get('password')
-        
-        if not all([name, email, password]):
-            return jsonify({'error': 'Name, email, and password are required'}), 400
-        
-        # Check if user exists
-        existing_user = User.query.filter_by(email=email).first()
-        if existing_user:
-            return jsonify({'error': 'User with this email already exists'}), 400
-        
-        # Create username from email
-        username = email.split('@')[0]
-        
-        # Hash password
-        hashed_password = pwd_context.hash(password)
-        
-        # Create new user
-        new_user = User(
-            username=username,
-            name=name,
-            email=email,
-            password=hashed_password,
-            global_limit=0,
-            currency_id=1  # Default to USD
-        )
-        
-        db.session.add(new_user)
-        db.session.commit()
-        
-        # Create token
-        token = create_access_token({
-            'user_id': new_user.user_id,
-            'username': new_user.username,
-            'email': new_user.email
-        })
-        
-        return jsonify({
-            'message': 'User registered successfully',
-            'user': {
-                'id': new_user.user_id,
-                'name': new_user.name,
-                'email': new_user.email
-            },
-            'token': token
-        }), 201
-        
-    except Exception as e:
-        logger.error(f'Error in signup: {e}')
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/auth/login', methods=['POST'])
-def login():
-    """User login endpoint"""
-    try:
-        data = request.get_json()
-        email = data.get('email')
-        password = data.get('password')
-        
-        if not all([email, password]):
-            return jsonify({'error': 'Email and password are required'}), 400
-        
-        # Find user by email
-        user = User.query.filter_by(email=email).first()
-        
-        if not user or not pwd_context.verify(password, user.password):
-            return jsonify({'error': 'Invalid email or password'}), 401
-        
-        # Create token
-        token = create_access_token({
-            'user_id': user.user_id,
-            'username': user.username,
-            'email': user.email
-        })
-        
-        return jsonify({
-            'message': 'Login successful',
-            'user': {
-                'id': user.user_id,
-                'name': user.name or user.username,
-                'email': user.email
-            },
-            'token': token
-        }), 200
-        
-    except Exception as e:
-        logger.error(f'Error in login: {e}')
-        return jsonify({'error': str(e)}), 500
+# Old username/password signup and login routes removed as per user request.
 
 # ===================== EXPENSE ENDPOINTS =====================
 

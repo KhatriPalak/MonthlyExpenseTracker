@@ -9,3 +9,5 @@ reportlab
 flask
 flask-cors
 Flask-SQLAlchemy
+Authlib
+requests

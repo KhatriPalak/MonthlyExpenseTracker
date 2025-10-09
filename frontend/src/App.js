@@ -2,15 +2,15 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import Login from './Login';
-import Signup from './Signup';
 import Modal from './Modal';
+import AuthCallback from './AuthCallback';
 
 import { API_CONFIG, buildUrl } from './config/api';
 function App() {
   // Authentication state
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [authMode, setAuthMode] = useState('login'); // 'login' or 'signup'
+  const [authMode, setAuthMode] = useState('login'); // This state is no longer needed
 
   // Expense tracker state (moved to top to avoid conditional hooks)
   const [year, setYear] = useState(2025);
@@ -501,21 +501,7 @@ function App() {
     setUser(userData);
   };
 
-  const handleSignup = (userData) => {
-    console.log('App: User signed up:', userData);
-    
-    // Clear any existing cached data
-    const cacheKey = `expense_data_${userData.id}_${year}`;
-    localStorage.removeItem(cacheKey);
-    localStorage.removeItem(`${cacheKey}_timestamp`);
-    console.log('App: Cleared cache for new user');
-    
-    // Clear session markers to force fresh data load
-    sessionStorage.removeItem('hasLoadedData');
-    console.log('App: Cleared session markers for fresh PostgreSQL data load');
-    
-    setUser(userData);
-  };
+  // handleSignup function removed as it is no longer needed.
 
   const handleLogout = () => {
     console.log('App: User logging out');
@@ -1448,6 +1434,11 @@ function App() {
     }
   };
 
+  // Simple router to handle the auth callback from Google
+  if (window.location.pathname === '/auth/callback') {
+    return <AuthCallback onLogin={handleLogin} />;
+  }
+
   // Show loading while checking authentication
   if (isLoading) {
     return (
@@ -1457,22 +1448,12 @@ function App() {
     );
   }
 
-  // Show authentication pages if user is not logged in
+  // Show authentication page if user is not logged in
   if (!user) {
+    // The new Login component handles both login and signup via Google.
+    // The handleLogin function will be triggered on a successful authentication.
     return (
-      <>
-        {authMode === 'login' ? (
-          <Login 
-            onLogin={handleLogin}
-            onSwitchToSignup={() => setAuthMode('signup')}
-          />
-        ) : (
-          <Signup 
-            onSignup={handleSignup}
-            onSwitchToLogin={() => setAuthMode('login')}
-          />
-        )}
-      </>
+      <Login onLogin={handleLogin} />
     );
   }
 
