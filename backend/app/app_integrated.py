@@ -33,6 +33,13 @@ app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
 
+# Session configuration for production (behind CloudFront/Load Balancer)
+app.config['SESSION_COOKIE_SECURE'] = True  # Only send cookie over HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
+app.config['SESSION_COOKIE_DOMAIN'] = 'monthlyexpensetracker.online'  # Your domain
+app.config['PREFERRED_URL_SCHEME'] = 'https'  # Generate HTTPS URLs
+
 db = SQLAlchemy(app)
 
 # Password hashing
