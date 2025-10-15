@@ -184,8 +184,38 @@ def google_login():
 def google_auth():
     """Callback route for Google OAuth"""
     try:
-        token = oauth.google.authorize_access_token()
-        user_info = token.get('userinfo')
+        # Manual token exchange to bypass state verification issues
+        # Get authorization code from query params
+        code = request.args.get('code')
+        if not code:
+            raise ValueError("No authorization code received")
+
+        # Manually exchange code for token, bypassing state check
+        from authlib.integrations.requests_client import OAuth2Session
+        client = OAuth2Session(
+            client_id=os.getenv("GOOGLE_CLIENT_ID"),
+            client_secret=os.getenv("GOOGLE_CLIENT_SECRET")
+        )
+
+        # Build redirect URI
+        redirect_uri = url_for('google_auth', _external=True)
+        if 'http://' in redirect_uri and 'localhost' not in redirect_uri:
+            redirect_uri = redirect_uri.replace('http://', 'https://')
+
+        # Exchange code for token
+        token = client.fetch_token(
+            'https://oauth2.googleapis.com/token',
+            code=code,
+            redirect_uri=redirect_uri
+        )
+
+        # Get user info from Google
+        import requests
+        user_info_response = requests.get(
+            'https://www.googleapis.com/oauth2/v2/userinfo',
+            headers={'Authorization': f"Bearer {token['access_token']}"}
+        )
+        user_info = user_info_response.json()
 
         if user_info:
             email = user_info.get('email')

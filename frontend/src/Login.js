@@ -26,8 +26,9 @@ const Login = () => {
   }, []);
 
   const handleGoogleLogin = () => {
-    // Construct the full URL for the backend's Google login endpoint.
-    // This ensures it works whether you access the frontend via localhost, IP, or a domain name.
+    // Redirect to backend Google OAuth endpoint
+    // In production, goes through same domain (Nginx proxies to backend)
+    // In development (localhost), uses port 5002
     const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     const backendUrl = isDevelopment
       ? `${window.location.protocol}//${window.location.hostname}:5002/login/google`
