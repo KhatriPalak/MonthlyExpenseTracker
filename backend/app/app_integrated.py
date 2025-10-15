@@ -178,6 +178,7 @@ def google_login():
     # Ensure the redirect URI is HTTPS for production
     if 'http://' in redirect_uri and 'localhost' not in redirect_uri:
         redirect_uri = redirect_uri.replace('http://', 'https://')
+    logger.info(f"Google OAuth redirect_uri: {redirect_uri}")
     return oauth.google.authorize_redirect(redirect_uri)
 
 @app.route('/auth/google')
