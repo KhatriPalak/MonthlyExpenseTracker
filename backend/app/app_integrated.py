@@ -185,10 +185,20 @@ def google_login():
 def google_auth():
     """Callback route for Google OAuth"""
     try:
+        # Debug logging - let's see everything
+        logger.info(f"=== OAuth Callback Debug ===")
+        logger.info(f"Full URL: {request.url}")
+        logger.info(f"Request path: {request.path}")
+        logger.info(f"Query string: {request.query_string}")
+        logger.info(f"Request args: {dict(request.args)}")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+
         # Manual token exchange to bypass state verification issues
         # Get authorization code from query params
         code = request.args.get('code')
         if not code:
+            logger.error(f"ERROR: No code found!")
             raise ValueError("No authorization code received")
 
         # Manually exchange code for token, bypassing state check
