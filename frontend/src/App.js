@@ -237,43 +237,59 @@ function App() {
         console.log('🚀 Starting parallel fetch of all data from PostgreSQL...');
         
         const token = localStorage.getItem('token');
-        const globalLimitPromise = fetch(API_CONFIG.ENDPOINTS.GLOBAL_LIMIT, {
+
+        // Wrap fetch calls to suppress abort/timeout errors from flashing
+        const safeFetch = (url, options) => {
+          return fetch(url, options).catch(err => {
+            // Silently handle timeout and network errors - they're handled by Promise.allSettled
+            if (err.name === 'AbortError' || err.message.includes('timeout')) {
+              console.log('🔕 Suppressed timeout error for:', url);
+            } else if (err.message.includes('Failed to fetch')) {
+              console.log('🔕 Suppressed network error for:', url);
+            }
+            throw err; // Re-throw to let Promise.allSettled handle it
+          });
+        };
+
+        const globalLimitPromise = safeFetch(API_CONFIG.ENDPOINTS.GLOBAL_LIMIT, {
           method: 'GET',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
             'Authorization': token ? `Bearer ${token}` : ''
           },
           signal: AbortSignal.timeout(8000)
         });
-        
+
         // Create all monthly limit fetch promises
-        const monthLimitPromises = months.map(monthObj => 
-          fetch(buildUrl(API_CONFIG.ENDPOINTS.MONTHLY_LIMIT, { year, month: monthObj.month_id }), {
+        const monthLimitPromises = months.map(monthObj =>
+          safeFetch(buildUrl(API_CONFIG.ENDPOINTS.MONTHLY_LIMIT, { year, month: monthObj.month_id }), {
             method: 'GET',
-            headers: { 
+            headers: {
               'Content-Type': 'application/json',
               'Authorization': token ? `Bearer ${token}` : ''
             },
             signal: AbortSignal.timeout(8000)
           }).then(response => ({ monthId: monthObj.month_id, response }))
+          .catch(err => ({ monthId: monthObj.month_id, error: err }))
         );
-        
+
         // Create all expense fetch promises
         const expensePromises = months.map(monthObj => {
-          return fetch(buildUrl(API_CONFIG.ENDPOINTS.EXPENSES, { year, month: monthObj.month_id }), {
+          return safeFetch(buildUrl(API_CONFIG.ENDPOINTS.EXPENSES, { year, month: monthObj.month_id }), {
             method: 'GET',
-            headers: { 
+            headers: {
               'Content-Type': 'application/json',
               'Authorization': token ? `Bearer ${token}` : ''
             },
             signal: AbortSignal.timeout(8000)
           }).then(response => ({ monthId: monthObj.month_id, response }))
+          .catch(err => ({ monthId: monthObj.month_id, error: err }))
         });
-        
+
         // Fetch categories
-        const categoriesPromise = fetch(API_CONFIG.ENDPOINTS.CATEGORIES, {
+        const categoriesPromise = safeFetch(API_CONFIG.ENDPOINTS.CATEGORIES, {
           method: 'GET',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
             'Authorization': token ? `Bearer ${token}` : ''
           },
@@ -306,19 +322,23 @@ function App() {
         const limitData = {};
         const tempLimitData = {};
         for (const result of monthLimitResponses) {
-          if (result.status === 'fulfilled' && result.value) {
+          if (result.status === 'fulfilled' && result.value && !result.value.error) {
             try {
               const { monthId, response } = result.value;
-              const monthData = await response.json();
-              // Backend returns 'limit', not 'monthly_limit'
-              if (monthData.limit && monthData.limit > 0) {
-                limitData[monthId] = monthData.limit;
-                tempLimitData[monthId] = monthData.limit.toString();
-                console.log(`✅ Monthly limit loaded immediately for month ${monthId}: ${currentCurrencySymbol}${monthData.limit}`);
+              if (response) {
+                const monthData = await response.json();
+                // Backend returns 'limit', not 'monthly_limit'
+                if (monthData.limit && monthData.limit > 0) {
+                  limitData[monthId] = monthData.limit;
+                  tempLimitData[monthId] = monthData.limit.toString();
+                  console.log(`✅ Monthly limit loaded immediately for month ${monthId}: ${currentCurrencySymbol}${monthData.limit}`);
+                }
               }
             } catch (error) {
               console.log('❌ Monthly limit parse error:', error);
             }
+          } else if (result.value?.error) {
+            console.log(`🔕 Skipped failed monthly limit for month ${result.value.monthId}`);
           }
         }
         
@@ -347,12 +367,19 @@ function App() {
         // Process expenses (limits already processed above)
         const expenseData = {};
         for (const result of expenseResponses) {
-          if (result.status === 'fulfilled' && result.value) {
+          if (result.status === 'fulfilled' && result.value && !result.value.error) {
             try {
               const { monthId, response } = result.value;
-              const expenseList = await response.json();
-              expenseData[`${year}-${monthId}`] = Array.isArray(expenseList) ? expenseList : [];
-              console.log(`✅ Expenses loaded for month ${monthId}: ${expenseData[`${year}-${monthId}`].length} items`);
+              if (response) {
+                const expenseList = await response.json();
+                expenseData[`${year}-${monthId}`] = Array.isArray(expenseList) ? expenseList : [];
+                console.log(`✅ Expenses loaded for month ${monthId}: ${expenseData[`${year}-${monthId}`].length} items`);
+              } else {
+                const monthId = result.value?.monthId;
+                if (monthId) {
+                  expenseData[`${year}-${monthId}`] = [];
+                }
+              }
             } catch (error) {
               console.log('❌ Expenses parse error:', error);
               // Get monthId from result.value if available
@@ -362,10 +389,11 @@ function App() {
               }
             }
           } else {
-            // Set empty array for failed requests
+            // Set empty array for failed requests or errors
             const monthId = result.value?.monthId;
             if (monthId) {
               expenseData[`${year}-${monthId}`] = [];
+              console.log(`🔕 Skipped failed expenses for month ${monthId}`);
             }
           }
         }
@@ -1556,10 +1584,12 @@ function App() {
         <div style={{
           maxWidth: '1600px',
           margin: '0 auto',
-          padding: '0 40px',
+          padding: '0 clamp(16px, 4vw, 40px)',
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'center'
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '16px'
         }}>
           <div>
             <h1 style={{
@@ -1635,12 +1665,14 @@ function App() {
         zIndex: 10,
         maxWidth: '1600px',
         margin: '0 auto',
-        padding: '60px 40px',
+        padding: 'clamp(24px, 5vw, 60px) clamp(16px, 4vw, 40px)',
         display: 'grid',
-        gridTemplateColumns: '400px 1fr',
-        gap: '60px',
+        gridTemplateColumns: 'minmax(300px, 400px) 1fr',
+        gap: 'clamp(24px, 4vw, 60px)',
         minHeight: 'calc(100vh - 120px)'
-      }}>
+      }}
+      className="main-grid"
+      >
         {/* Left Panel - Elegant Light */}
         <div style={{
           background: 'rgba(255, 255, 255, 0.9)',
@@ -1856,7 +1888,7 @@ function App() {
             <div style={{ marginBottom: '20px' }}>
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
                 gap: '8px',
                 marginBottom: '16px'
               }}>
@@ -2637,57 +2669,52 @@ function App() {
                           Monthly Limit Control
                         </h3>
                         
-                        <div style={{
-                          display: 'grid',
-                          gridTemplateColumns: '1fr auto auto',
-                          gap: '16px',
-                          alignItems: 'end'
-                        }}>
-                          <div>
-                            <label style={{
-                              display: 'block',
-                              color: '#475569',
-                              fontSize: '14px',
-                              fontWeight: '600',
-                              marginBottom: '12px',
-                              fontFamily: "'Inter', sans-serif"
-                            }}>
-                              Amount
-                            </label>
-                            <input 
-                              type="number" 
-                              placeholder={globalLimit > 0 ? `Global: ${currentCurrencySymbol}${globalLimit}` : "Enter amount..."} 
-                              value={tempMonthLimits[monthId] || ''} 
-                              onChange={e => handleLimitChange(monthId, e.target.value)}
-                              style={{
-                                width: '100%',
-                                background: 'white',
-                                border: '2px solid #e2e8f0',
-                                borderRadius: '12px',
-                                padding: '16px 20px',
-                                color: '#1e293b',
-                                fontSize: '16px',
-                                outline: 'none',
-                                transition: 'all 0.3s ease',
-                                fontFamily: "'Inter', sans-serif",
-                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)'
-                              }}
-                              onFocus={(e) => {
-                                e.target.style.borderColor = '#6366f1';
-                                e.target.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.1)';
-                              }}
-                              onBlur={(e) => {
-                                e.target.style.borderColor = '#e2e8f0';
-                                e.target.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.02)';
-                              }}
-                            />
-                          </div>
-                          
-                          <div style={{
-                            display: 'flex',
-                            gap: '12px',
-                            marginTop: '20px'
+                        <div>
+                          <label style={{
+                            display: 'block',
+                            color: '#475569',
+                            fontSize: '14px',
+                            fontWeight: '600',
+                            marginBottom: '12px',
+                            fontFamily: "'Inter', sans-serif"
                           }}>
+                            Amount
+                          </label>
+                          <input
+                            type="number"
+                            placeholder={globalLimit > 0 ? `Global: ${currentCurrencySymbol}${globalLimit}` : "Enter amount..."}
+                            value={tempMonthLimits[monthId] || ''}
+                            onChange={e => handleLimitChange(monthId, e.target.value)}
+                            style={{
+                              width: '100%',
+                              background: 'white',
+                              border: '2px solid #e2e8f0',
+                              borderRadius: '12px',
+                              padding: '16px 20px',
+                              color: '#1e293b',
+                              fontSize: '16px',
+                              outline: 'none',
+                              transition: 'all 0.3s ease',
+                              fontFamily: "'Inter', sans-serif",
+                              boxShadow: '0 2px 4px rgba(0, 0, 0, 0.02)'
+                            }}
+                            onFocus={(e) => {
+                              e.target.style.borderColor = '#6366f1';
+                              e.target.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.1)';
+                            }}
+                            onBlur={(e) => {
+                              e.target.style.borderColor = '#e2e8f0';
+                              e.target.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.02)';
+                            }}
+                          />
+                        </div>
+
+                        <div style={{
+                          display: 'flex',
+                          gap: '12px',
+                          marginTop: '16px',
+                          flexWrap: 'wrap'
+                        }}>
                             <button 
                               onClick={() => saveMonthlyLimit(monthId)}
                               style={{
@@ -2744,9 +2771,8 @@ function App() {
                                 Clear
                               </button>
                             )}
-                          </div>
                         </div>
-                        
+
                         {!hasMonthlyLimit && globalLimit > 0 && (
                           <div style={{
                             marginTop: '16px',
